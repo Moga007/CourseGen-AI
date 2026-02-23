@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+mistralai>=1.0.0
+anthropic>=0.43.0
+groq>=0.4.0
+python-dotenv==1.0.1
+pydantic==2.10.4

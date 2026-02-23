@@ -1,0 +1,33 @@
+import { useState } from 'react'
+
+export default function Header() {
+    return (
+        <header className="w-full py-6 px-4 animate-fade-in-up">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    {/* Logo */}
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                        style={{ background: 'var(--accent-gradient)' }}>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                            CourseGen <span style={{ background: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>AI</span>
+                        </h1>
+                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            Génération automatique de cours académiques
+                        </p>
+                    </div>
+                </div>
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full"
+                    style={{ background: 'rgba(52, 211, 153, 0.1)', border: '1px solid rgba(52, 211, 153, 0.2)' }}>
+                    <div className="w-2 h-2 rounded-full" style={{ background: 'var(--success)' }}></div>
+                    <span className="text-xs font-medium" style={{ color: 'var(--success)' }}>Système opérationnel</span>
+                </div>
+            </div>
+        </header>
+    )
+}
