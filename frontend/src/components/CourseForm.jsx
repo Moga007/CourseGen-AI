@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const NIVEAUX = [
     { value: 'L1', label: 'L1 — 1ʳᵉ année Licence' },
@@ -8,7 +8,7 @@ const NIVEAUX = [
     { value: 'M2', label: 'M2 — 2ᵉ année Master' },
 ]
 
-export default function CourseForm({ onSubmit, isLoading }) {
+export default function CourseForm({ onSubmit, isLoading, initialData }) {
     const [formData, setFormData] = useState({
         specialite: '',
         niveau: 'L3',
@@ -25,6 +25,13 @@ export default function CourseForm({ onSubmit, isLoading }) {
         e.preventDefault()
         onSubmit(formData)
     }
+
+    // Replay : remplir le formulaire quand initialData change
+    useEffect(() => {
+        if (initialData) {
+            setFormData(initialData)
+        }
+    }, [initialData])
 
     const isFormValid = formData.specialite && formData.module && formData.chapitre
 
@@ -152,6 +159,19 @@ export default function CourseForm({ onSubmit, isLoading }) {
                                 <path d="M8 12l2 2 4-4" />
                             </svg>
                             Groq (LLaMA)
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        className={`engine-option ${formData.moteur === 'oxlo' ? 'active' : ''}`}
+                        onClick={() => setFormData({ ...formData, moteur: 'oxlo' })}
+                    >
+                        <span className="flex items-center justify-center gap-2">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M8 12l2 2 4-4" />
+                            </svg>
+                            Oxlo (Qwen)
                         </span>
                     </button>
                 </div>

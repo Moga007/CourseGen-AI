@@ -1,6 +1,7 @@
 # Environnement
 .env
 *.env.local
+historique.json
 
 # Python
 __pycache__/

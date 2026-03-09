@@ -3,13 +3,49 @@ CourseGen AI — Backend FastAPI
 Système de génération automatique de cours académiques par IA.
 """
 
+import json
+import os
+import time
+import string
+import random
+from datetime import datetime
+from pathlib import Path
+
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from prompt_builder import build_system_prompt, build_user_message
-from ai_engines import generate_with_mistral, generate_with_claude, generate_with_groq
+from prompt_builder import build_system_prompt, build_user_message, build_system_prompt_light, build_user_message_light
+from ai_engines import generate_with_mistral, generate_with_claude, generate_with_groq, generate_with_oxlo
+from slides_builder import markdown_to_slides_prompt
+
+# --- Historique (fichier JSON) ---
+
+HISTORIQUE_PATH = Path(__file__).parent / "historique.json"
+
+
+def _load_historique() -> list:
+    """Charge l'historique depuis le fichier JSON."""
+    if not HISTORIQUE_PATH.exists():
+        return []
+    try:
+        with open(HISTORIQUE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return []
+
+
+def _save_historique(historique: list) -> None:
+    """Sauvegarde l'historique dans le fichier JSON."""
+    with open(HISTORIQUE_PATH, "w", encoding="utf-8") as f:
+        json.dump(historique, f, ensure_ascii=False, indent=2)
+
+
+def _generate_id(length: int = 6) -> str:
+    """Génère un identifiant aléatoire de 6 caractères alphanumériques."""
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 # --- Application FastAPI ---
 
@@ -35,6 +71,7 @@ class MoteurIA(str, Enum):
     MISTRAL = "mistral"
     CLAUDE = "claude"
     GROQ = "groq"
+    OXLO = "oxlo"
 
 
 class GenerateRequest(BaseModel):
@@ -48,6 +85,18 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     contenu: str = Field(..., description="Contenu du cours généré en Markdown")
     moteur_utilise: str = Field(..., description="Moteur IA utilisé pour la génération")
+
+
+class SlidesRequest(BaseModel):
+    contenu: str = Field(..., description="Contenu du cours en Markdown")
+    specialite: str = Field(..., description="Spécialité académique")
+    module: str = Field(..., description="Nom du module")
+    chapitre: str = Field(..., description="Titre du chapitre")
+
+
+class SlidesResponse(BaseModel):
+    editor_url: str = Field(..., description="URL de la présentation Beautiful.ai")
+    slides_prompt: str = Field(..., description="Prompt structuré envoyé à Beautiful.ai")
 
 
 # --- Routes ---
@@ -67,21 +116,37 @@ async def generate_course(request: GenerateRequest):
     - **niveau** : Le niveau d'études (ex: L3, M1)
     - **module** : Le nom du module (ex: Systèmes d'exploitation)
     - **chapitre** : Le sujet du chapitre (ex: Gestion de la mémoire)
-    - **moteur** : Le moteur IA à utiliser (mistral, claude ou groq)
+    - **moteur** : Le moteur IA à utiliser (mistral, claude, groq ou oxlo)
     """
-    # Construction du prompt pédagogique
-    system_prompt = build_system_prompt(
-        specialite=request.specialite,
-        niveau=request.niveau,
-        module=request.module,
-        chapitre=request.chapitre
-    )
-    user_message = build_user_message(
-        specialite=request.specialite,
-        niveau=request.niveau,
-        module=request.module,
-        chapitre=request.chapitre
-    )
+    # Oxlo utilise un prompt allégé pour éviter les timeouts de leur infrastructure
+    if request.moteur == MoteurIA.OXLO:
+        system_prompt = build_system_prompt_light(
+            specialite=request.specialite,
+            niveau=request.niveau,
+            module=request.module,
+            chapitre=request.chapitre
+        )
+        user_message = build_user_message_light(
+            specialite=request.specialite,
+            niveau=request.niveau,
+            module=request.module,
+            chapitre=request.chapitre
+        )
+    else:
+        system_prompt = build_system_prompt(
+            specialite=request.specialite,
+            niveau=request.niveau,
+            module=request.module,
+            chapitre=request.chapitre
+        )
+        user_message = build_user_message(
+            specialite=request.specialite,
+            niveau=request.niveau,
+            module=request.module,
+            chapitre=request.chapitre
+        )
+
+    start_time = time.time()
 
     try:
         if request.moteur == MoteurIA.MISTRAL:
@@ -90,9 +155,12 @@ async def generate_course(request: GenerateRequest):
         elif request.moteur == MoteurIA.CLAUDE:
             contenu = await generate_with_claude(system_prompt, user_message)
             moteur_utilise = "Claude Sonnet (Anthropic)"
-        else:
+        elif request.moteur == MoteurIA.GROQ:
             contenu = await generate_with_groq(system_prompt, user_message)
             moteur_utilise = "LLaMA 3.3 70B (Groq)"
+        else:
+            contenu = await generate_with_oxlo(system_prompt, user_message)
+            moteur_utilise = "Qwen 3 32B (Oxlo)"
 
     except ValueError as e:
         # Clé API manquante
@@ -110,7 +178,84 @@ async def generate_course(request: GenerateRequest):
             detail="Le moteur IA n'a retourné aucun contenu. Veuillez réessayer."
         )
 
+    # Enregistrer dans l'historique
+    duree_secondes = round(time.time() - start_time, 1)
+    entry = {
+        "id": _generate_id(),
+        "date": datetime.now().isoformat(timespec="seconds"),
+        "specialite": request.specialite,
+        "niveau": request.niveau,
+        "module": request.module,
+        "chapitre": request.chapitre,
+        "moteur": moteur_utilise,
+        "duree_secondes": duree_secondes,
+    }
+    historique = _load_historique()
+    historique.append(entry)
+    _save_historique(historique)
+
     return GenerateResponse(contenu=contenu, moteur_utilise=moteur_utilise)
+
+
+@app.post("/generate-slides", response_model=SlidesResponse)
+async def generate_slides(request: SlidesRequest):
+    """
+    Convertit un cours Markdown en présentation Beautiful.ai.
+    Retourne l'URL de la présentation générée.
+    """
+    api_key = os.getenv("BEAUTIFUL_AI_API_KEY")
+    if not api_key or api_key == "votre_cle_beautiful_ai_ici":
+        raise HTTPException(
+            status_code=400,
+            detail="BEAUTIFUL_AI_API_KEY non configurée. Ajoutez votre clé dans le fichier .env"
+        )
+
+    slides_prompt = markdown_to_slides_prompt(
+        contenu=request.contenu,
+        specialite=request.specialite,
+        module=request.module,
+        chapitre=request.chapitre,
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                "https://www.beautiful.ai/api/v1/generatePresentation",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"prompt": slides_prompt},
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Beautiful.ai API timeout. Veuillez réessayer.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Beautiful.ai : {str(e)}")
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Beautiful.ai a retourné une erreur {response.status_code} : {response.text}"
+        )
+
+    data = response.json()
+    editor_url = data.get("editorUrl") or data.get("editor_url") or data.get("url")
+
+    if not editor_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Beautiful.ai n'a retourné aucune URL de présentation."
+        )
+
+    return SlidesResponse(editor_url=editor_url, slides_prompt=slides_prompt)
+
+
+@app.get("/historique")
+async def get_historique():
+    """Retourne l'historique des cours générés, du plus récent au plus ancien."""
+    historique = _load_historique()
+    historique.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return historique
 
 
 # --- Point d'entrée ---

@@ -4,13 +4,16 @@ import Header from './components/Header'
 import CourseForm from './components/CourseForm'
 import CourseDisplay from './components/CourseDisplay'
 import LoadingSpinner from './components/LoadingSpinner'
+import HistorySection from './components/HistorySection'
 
 const API_URL = 'http://localhost:8000'
 
 function App() {
   const [courseData, setCourseData] = useState(null)
+  const [lastFormData, setLastFormData] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [replayData, setReplayData] = useState(null)
 
   const handleGenerate = async (formData) => {
     setIsLoading(true)
@@ -19,9 +22,12 @@ function App() {
 
     try {
       const response = await axios.post(`${API_URL}/generate`, formData, {
-        timeout: 120000, // 2 minutes max
+        timeout: 720000, // 12 minutes max (contenu enrichi + continuations automatiques)
       })
       setCourseData(response.data)
+      setLastFormData(formData)
+      // Rafraîchir l'historique
+      if (window.__refreshHistorique) window.__refreshHistorique()
     } catch (err) {
       if (err.response) {
         // Server responded with error
@@ -38,13 +44,17 @@ function App() {
     }
   }
 
+  const handleReplay = (formData) => {
+    setReplayData(formData)
+  }
+
   return (
     <div className="min-h-screen pb-12">
       <Header />
 
       <main className="max-w-5xl mx-auto px-4 mt-4 space-y-8">
         {/* Form */}
-        <CourseForm onSubmit={handleGenerate} isLoading={isLoading} />
+        <CourseForm onSubmit={handleGenerate} isLoading={isLoading} initialData={replayData} />
 
         {/* Error */}
         {error && (
@@ -70,6 +80,7 @@ function App() {
           <CourseDisplay
             contenu={courseData.contenu}
             moteurUtilise={courseData.moteur_utilise}
+            formParams={lastFormData}
           />
         )}
 
@@ -93,6 +104,9 @@ function App() {
             </p>
           </div>
         )}
+
+        {/* History */}
+        <HistorySection onReplay={handleReplay} />
       </main>
 
       {/* Bottom bar */}

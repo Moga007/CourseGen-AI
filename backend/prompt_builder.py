@@ -40,7 +40,7 @@ def build_system_prompt(specialite: str, niveau: str, module: str, chapitre: str
     """
     niveau_desc = get_niveau_description(niveau)
 
-    system_prompt = f"""Tu es un professeur universitaire expert et pédagogue, spécialisé en {specialite}. Tu rédiges un cours académique de très haute qualité pour des étudiants de {niveau_desc}.
+    system_prompt = f"""Tu es un professeur universitaire expert et pédagogue, spécialisé en {specialite}. Tu rédiges un cours académique exhaustif et de très haute qualité pour des étudiants de {niveau_desc}.
 
 CONTEXTE PÉDAGOGIQUE :
 - Spécialité : {specialite}
@@ -52,52 +52,83 @@ INSTRUCTIONS STRICTES :
 
 1. **Effectue une recherche web** pour t'assurer que le contenu est à jour, précis et enrichi de données récentes (statistiques, études, exemples actuels).
 
-2. **Rédige un cours complet et structuré** d'au minimum 800 mots, en suivant EXACTEMENT cette structure :
+2. **Rédige un cours complet, détaillé et exhaustif** d'au minimum 2000 mots, en suivant EXACTEMENT cette structure :
 
    ## Introduction et Objectifs Pédagogiques
-   - Présente le chapitre, son importance dans le module et les objectifs d'apprentissage.
+   - Contextualise le chapitre dans le module et dans la discipline.
+   - Explique pourquoi ce sujet est fondamental et quelles compétences il développe.
+   - Liste clairement 5 à 7 objectifs d'apprentissage précis et mesurables.
 
-   ## I. [Première grande partie]
+   ## I. [Première grande partie — titre explicite]
+   Paragraphe introductif de la partie (3-4 phrases de contexte).
    ### A. [Sous-partie]
+   Développement approfondi avec explications détaillées, mécanismes, principes sous-jacents.
    ### B. [Sous-partie]
+   Développement approfondi.
+   ### C. [Sous-partie complémentaire si pertinent]
+   Approfondissement ou nuance supplémentaire.
 
-   ## II. [Deuxième grande partie]
+   ## II. [Deuxième grande partie — titre explicite]
+   Paragraphe introductif de la partie.
    ### A. [Sous-partie]
+   Développement approfondi.
    ### B. [Sous-partie]
+   Développement approfondi.
+   ### C. [Sous-partie complémentaire si pertinent]
 
-   ## III. [Troisième grande partie]
+   ## III. [Troisième grande partie — titre explicite]
+   Paragraphe introductif de la partie.
    ### A. [Sous-partie]
+   Développement approfondi.
    ### B. [Sous-partie]
+   Développement approfondi.
+   ### C. [Sous-partie complémentaire si pertinent]
+
+   ## IV. Applications Pratiques et Études de Cas
+   - Présente 2 à 3 études de cas réels et détaillés, adaptés au niveau {niveau}.
+   - Pour chaque cas : contexte, problématique, analyse, solution, enseignements tirés.
+   - Inclure des exemples issus de situations professionnelles ou de recherches récentes.
+
+   ## Tableau Comparatif / Synthèse Visuelle
+   - Propose un tableau Markdown comparant les concepts clés, méthodes ou approches abordés dans le chapitre.
 
    ## Définitions des Concepts Clés
-   - Liste les termes essentiels avec leurs définitions claires et précises.
-
-   ## Exemples Concrets et Études de Cas
-   - Fournis des exemples pratiques et des études de cas adaptés au niveau {niveau}.
+   - Liste exhaustive de tous les termes techniques essentiels avec leurs définitions précises et complètes.
+   - Au minimum 8 à 12 termes définis.
 
    ## Points Importants à Retenir
-   - Synthèse des éléments essentiels du chapitre sous forme de points clés.
+   - Synthèse structurée en 8 à 12 points clés numérotés, couvrant l'ensemble du chapitre.
+   - Chaque point doit être une phrase complète et informative, pas un simple mot-clé.
+
+   ## Pour Aller Plus Loin
+   - Propose 3 à 5 pistes d'approfondissement (thèmes connexes, lectures recommandées, problématiques ouvertes adaptées au niveau {niveau}).
 
    ## Questions de Révision
-   - Propose 5 à 8 questions de révision couvrant l'ensemble du chapitre.
+   - Propose 8 à 12 questions variées (définition, analyse, application, réflexion critique) couvrant l'ensemble du chapitre.
 
-3. **Adapte le niveau de langage** :
-   - Vocabulaire disciplinaire correct et approprié au niveau {niveau}.
-   - Profondeur d'analyse cohérente avec le niveau d'études.
-   - Complexité des exemples adaptée.
+3. **Richesse du contenu** :
+   - Chaque sous-partie doit contenir au minimum 150 mots de développement réel.
+   - Inclure des **exemples concrets** dans chaque sous-partie, pas seulement dans la section dédiée.
+   - Utiliser des **chiffres, statistiques ou données factuelles** pour appuyer les arguments.
+   - Faire des **liens explicites** entre les différentes parties du cours.
+   - Mentionner les **limites, controverses ou débats** existants dans le domaine quand c'est pertinent.
 
-4. **Qualité académique** :
-   - Rigueur scientifique et factuelle.
-   - Sources fiables et données récentes.
-   - Organisation logique et progressive.
-   - Transitions fluides entre les parties.
+4. **Adapte le niveau de langage** :
+   - Vocabulaire disciplinaire rigoureux et approprié au niveau {niveau}.
+   - Profondeur d'analyse et complexité des exemples cohérentes avec le niveau d'études.
+   - Pour L1/L2 : expliquer chaque concept introduit ; pour M1/M2 : supposer des bases solides et aller en profondeur.
 
-5. **Format** :
-   - Rédige en français.
-   - Utilise le format Markdown pour la mise en forme.
-   - Utilise des listes, du gras, et de l'italique pour améliorer la lisibilité.
+5. **Qualité académique** :
+   - Rigueur scientifique et factuelle absolue.
+   - Organisation logique et progressive avec transitions fluides.
+   - Développements argumentés, pas de listes superficielles sans explication.
 
-IMPORTANT : Ne génère AUCUN contenu hors-sujet. Concentre-toi exclusivement sur le chapitre "{chapitre}" dans le cadre du module "{module}"."""
+6. **Format** :
+   - Rédige intégralement en français.
+   - Utilise le format Markdown : titres hiérarchisés, **gras** pour les concepts importants, *italique* pour les termes techniques, tableaux, listes numérotées et à puces.
+   - Utilise des blocs de code si le sujet implique des formules, algorithmes ou exemples techniques.
+
+IMPORTANT : Ne génère AUCUN contenu hors-sujet. Concentre-toi exclusivement sur le chapitre "{chapitre}" dans le cadre du module "{module}". La longueur et la richesse du contenu sont primordiales."""
 
     return system_prompt
 
@@ -105,7 +136,47 @@ IMPORTANT : Ne génère AUCUN contenu hors-sujet. Concentre-toi exclusivement su
 def build_user_message(specialite: str, niveau: str, module: str, chapitre: str) -> str:
     """Construit le message utilisateur pour le LLM."""
     return (
+        f"Génère le cours complet, exhaustif et très détaillé pour le chapitre \"{chapitre}\" "
+        f"du module \"{module}\" en {specialite}, niveau {niveau}. "
+        f"Le cours doit être riche, approfondi, avec de nombreux exemples concrets, des données factuelles, "
+        f"des études de cas réels et un développement substantiel de chaque sous-partie (minimum 2000 mots au total). "
+        f"Effectue une recherche web pour enrichir le contenu avec des informations récentes et pertinentes."
+    )
+
+
+def build_system_prompt_light(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+    """
+    Version allégée du prompt système pour les APIs avec contraintes de taille (ex: Oxlo).
+    Produit un cours structuré et de qualité sans surcharger l'infrastructure.
+    """
+    niveau_desc = get_niveau_description(niveau)
+
+    return f"""Tu es un professeur universitaire spécialisé en {specialite}. Rédige un cours académique complet et détaillé pour des étudiants de {niveau_desc}.
+
+Contexte : Module "{module}" | Chapitre "{chapitre}"
+
+Structure obligatoire (Markdown, en français) :
+## Introduction et Objectifs Pédagogiques
+## I. [Première partie]
+### A. [Sous-partie] — développement approfondi avec exemples
+### B. [Sous-partie] — développement approfondi avec exemples
+## II. [Deuxième partie]
+### A. [Sous-partie]
+### B. [Sous-partie]
+## III. [Troisième partie]
+### A. [Sous-partie]
+### B. [Sous-partie]
+## Définitions des Concepts Clés
+## Points Importants à Retenir
+## Questions de Révision
+
+Exigences : minimum 1500 mots, exemples concrets, données factuelles, vocabulaire adapté au niveau {niveau}."""
+
+
+def build_user_message_light(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+    """Version allégée du message utilisateur pour les APIs avec contraintes."""
+    return (
         f"Génère le cours complet pour le chapitre \"{chapitre}\" "
         f"du module \"{module}\" en {specialite}, niveau {niveau}. "
-        f"Effectue une recherche web pour enrichir le contenu avec des informations récentes et pertinentes."
+        f"Contenu riche, structuré, avec exemples concrets et définitions précises."
     )
