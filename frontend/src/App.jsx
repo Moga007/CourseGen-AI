@@ -19,13 +19,13 @@ function App() {
     setIsLoading(true)
     setError(null)
     setCourseData(null)
+    setLastFormData(formData)
 
     try {
       const response = await axios.post(`${API_URL}/generate`, formData, {
         timeout: 720000, // 12 minutes max (contenu enrichi + continuations automatiques)
       })
       setCourseData(response.data)
-      setLastFormData(formData)
       // Rafraîchir l'historique
       if (window.__refreshHistorique) window.__refreshHistorique()
     } catch (err) {
@@ -71,7 +71,7 @@ function App() {
         {/* Loading */}
         {isLoading && (
           <div className="glass-card">
-            <LoadingSpinner />
+            <LoadingSpinner moteur={lastFormData?.moteur} />
           </div>
         )}
 

@@ -6,6 +6,9 @@ const API_URL = 'http://localhost:8000'
 export default function HistorySection({ onReplay }) {
     const [historique, setHistorique] = useState([])
     const [isLoading, setIsLoading] = useState(true)
+    const [expanded, setExpanded] = useState(false)
+
+    const VISIBLE = 3
 
     const fetchHistorique = async () => {
         try {
@@ -95,7 +98,7 @@ export default function HistorySection({ onReplay }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {historique.map((entry) => (
+                        {(expanded ? historique : historique.slice(0, VISIBLE)).map((entry) => (
                             <tr key={entry.id}
                                 style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s' }}
                                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(99, 102, 241, 0.05)'}
@@ -183,6 +186,49 @@ export default function HistorySection({ onReplay }) {
                     </tbody>
                 </table>
             </div>
+
+            {/* Bouton voir tout / réduire */}
+            {historique.length > VISIBLE && (
+                <button
+                    onClick={() => setExpanded(prev => !prev)}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        margin: '16px auto 0',
+                        background: 'transparent',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        padding: '7px 16px',
+                        color: 'var(--text-muted)',
+                        fontSize: '0.8rem',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        fontFamily: 'Inter, sans-serif',
+                        transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.color = 'var(--accent-primary-light)'
+                        e.currentTarget.style.borderColor = 'var(--accent-primary)'
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.color = 'var(--text-muted)'
+                        e.currentTarget.style.borderColor = 'var(--border-subtle)'
+                    }}
+                >
+                    <svg
+                        width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                        style={{ transition: 'transform 0.3s', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                    >
+                        <polyline points="6,9 12,15 18,9" />
+                    </svg>
+                    {expanded
+                        ? `Réduire`
+                        : `Voir les ${historique.length - VISIBLE} cours précédents`
+                    }
+                </button>
+            )}
         </div>
     )
 }

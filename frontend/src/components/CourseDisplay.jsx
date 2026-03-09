@@ -9,6 +9,9 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
     const [copiedHtml, setCopiedHtml] = useState(false)
     const [slidesLoading, setSlidesLoading] = useState(false)
     const [slidesError, setSlidesError] = useState(null)
+    const [quizLoading, setQuizLoading] = useState(false)
+    const [quizError, setQuizError] = useState(null)
+    const [quizMoteur, setQuizMoteur] = useState('mistral')
 
     const handleGenerateSlides = async () => {
         setSlidesLoading(true)
@@ -27,6 +30,36 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
             setTimeout(() => setSlidesError(null), 5000)
         } finally {
             setSlidesLoading(false)
+        }
+    }
+
+    const handleGenerateQuiz = async () => {
+        setQuizLoading(true)
+        setQuizError(null)
+        try {
+            const response = await axios.post(`${API_URL}/generate-quiz`, {
+                specialite: formParams?.specialite || '',
+                niveau: formParams?.niveau || '',
+                module: formParams?.module || '',
+                chapitre: formParams?.chapitre || '',
+                moteur: quizMoteur,
+            }, { timeout: 120000 })
+
+            const blob = new Blob([response.data.contenu_gift], { type: 'text/plain;charset=utf-8' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `quiz_${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}.gift`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            const msg = err.response?.data?.detail || 'Erreur lors de la génération du quiz.'
+            setQuizError(msg)
+            setTimeout(() => setQuizError(null), 6000)
+        } finally {
+            setQuizLoading(false)
         }
     }
 
@@ -94,6 +127,52 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                 </div>
 
                 <div className="flex gap-2 flex-wrap">
+                    {/* Bouton Quiz GIFT */}
+                    <div className="flex items-center gap-1">
+                        <select
+                            value={quizMoteur}
+                            onChange={e => setQuizMoteur(e.target.value)}
+                            disabled={quizLoading}
+                            style={{
+                                background: 'var(--bg-secondary)',
+                                border: '1px solid var(--border-subtle)',
+                                color: 'var(--text-secondary)',
+                                borderRadius: '8px 0 0 8px',
+                                padding: '6px 8px',
+                                fontSize: '12px',
+                                height: '100%',
+                            }}
+                        >
+                            <option value="mistral">Mistral</option>
+                            <option value="claude">Claude</option>
+                            <option value="groq">Groq</option>
+                            <option value="oxlo">Oxlo</option>
+                        </select>
+                        <button
+                            onClick={handleGenerateQuiz}
+                            disabled={quizLoading}
+                            className="btn-secondary"
+                            title="Générer un quiz Moodle au format GIFT"
+                            style={{ borderRadius: '0 8px 8px 0' }}
+                        >
+                            {quizLoading ? (
+                                <>
+                                    <div className="loading-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
+                                    Génération...
+                                </>
+                            ) : (
+                                <>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10" />
+                                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                    Quiz GIFT
+                                </>
+                            )}
+                        </button>
+                    </div>
+
                     {/* Bouton Générer les slides */}
                     <button
                         onClick={handleGenerateSlides}
@@ -158,6 +237,18 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                         )}
                     </button>
                 </div>
+
+                {/* Erreur quiz */}
+                {quizError && (
+                    <div className="error-message mt-3 text-xs">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="15" y1="9" x2="9" y2="15" />
+                            <line x1="9" y1="9" x2="15" y2="15" />
+                        </svg>
+                        {quizError}
+                    </div>
+                )}
 
                 {/* Erreur slides */}
                 {slidesError && (

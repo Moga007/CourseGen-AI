@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from prompt_builder import build_system_prompt, build_user_message, build_system_prompt_light, build_user_message_light
+from prompt_builder import build_system_prompt, build_user_message, build_system_prompt_light, build_user_message_light, build_quiz_prompt, build_quiz_user_message
 from ai_engines import generate_with_mistral, generate_with_claude, generate_with_groq, generate_with_oxlo
 from slides_builder import markdown_to_slides_prompt
 
@@ -97,6 +97,26 @@ class SlidesRequest(BaseModel):
 class SlidesResponse(BaseModel):
     editor_url: str = Field(..., description="URL de la présentation Beautiful.ai")
     slides_prompt: str = Field(..., description="Prompt structuré envoyé à Beautiful.ai")
+
+
+class MoteurQuiz(str, Enum):
+    MISTRAL = "mistral"
+    CLAUDE = "claude"
+    GROQ = "groq"
+    OXLO = "oxlo"
+
+
+class QuizRequest(BaseModel):
+    specialite: str = Field(..., description="Spécialité académique")
+    niveau: str = Field(..., description="Niveau d'études")
+    module: str = Field(..., description="Nom du module")
+    chapitre: str = Field(..., description="Titre du chapitre")
+    moteur: MoteurQuiz = Field(default=MoteurQuiz.MISTRAL, description="Moteur IA (mistral ou claude)")
+
+
+class QuizResponse(BaseModel):
+    contenu_gift: str = Field(..., description="Quiz au format GIFT prêt à importer dans Moodle")
+    moteur_utilise: str = Field(..., description="Moteur IA utilisé")
 
 
 # --- Routes ---
@@ -248,6 +268,60 @@ async def generate_slides(request: SlidesRequest):
         )
 
     return SlidesResponse(editor_url=editor_url, slides_prompt=slides_prompt)
+
+
+@app.post("/generate-quiz", response_model=QuizResponse)
+async def generate_quiz(request: QuizRequest):
+    """
+    Génère un quiz au format GIFT (Moodle) à partir des paramètres du cours.
+
+    - **specialite** : La spécialité académique
+    - **niveau** : Le niveau d'études
+    - **module** : Le nom du module
+    - **chapitre** : Le sujet du chapitre
+    - **moteur** : mistral ou claude uniquement
+    """
+    system_prompt = build_quiz_prompt(
+        specialite=request.specialite,
+        niveau=request.niveau,
+        module=request.module,
+        chapitre=request.chapitre,
+    )
+    user_message = build_quiz_user_message(
+        specialite=request.specialite,
+        niveau=request.niveau,
+        module=request.module,
+        chapitre=request.chapitre,
+    )
+
+    try:
+        if request.moteur == MoteurQuiz.MISTRAL:
+            contenu_gift = await generate_with_mistral(system_prompt, user_message)
+            moteur_utilise = "Mistral Large (Mistral AI)"
+        elif request.moteur == MoteurQuiz.CLAUDE:
+            contenu_gift = await generate_with_claude(system_prompt, user_message)
+            moteur_utilise = "Claude Sonnet (Anthropic)"
+        elif request.moteur == MoteurQuiz.GROQ:
+            contenu_gift = await generate_with_groq(system_prompt, user_message)
+            moteur_utilise = "LLaMA 3.3 70B (Groq)"
+        else:
+            contenu_gift = await generate_with_oxlo(system_prompt, user_message)
+            moteur_utilise = "Qwen 3 32B (Oxlo)"
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Erreur lors de la communication avec l'API {request.moteur.value}: {str(e)}"
+        )
+
+    if not contenu_gift or not contenu_gift.strip():
+        raise HTTPException(
+            status_code=500,
+            detail="Le moteur IA n'a retourné aucun contenu. Veuillez réessayer."
+        )
+
+    return QuizResponse(contenu_gift=contenu_gift, moteur_utilise=moteur_utilise)
 
 
 @app.get("/historique")
