@@ -7,29 +7,38 @@ const API_URL = 'http://localhost:8000'
 export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
     const [copied, setCopied] = useState(false)
     const [copiedHtml, setCopiedHtml] = useState(false)
-    const [slidesLoading, setSlidesLoading] = useState(false)
-    const [slidesError, setSlidesError] = useState(null)
+    const [pptxLoading, setPptxLoading] = useState(false)
+    const [pptxError, setPptxError] = useState(null)
     const [quizLoading, setQuizLoading] = useState(false)
     const [quizError, setQuizError] = useState(null)
     const [quizMoteur, setQuizMoteur] = useState('mistral')
 
-    const handleGenerateSlides = async () => {
-        setSlidesLoading(true)
-        setSlidesError(null)
+    const handleGeneratePptx = async () => {
+        setPptxLoading(true)
+        setPptxError(null)
         try {
-            const response = await axios.post(`${API_URL}/generate-slides`, {
+            const response = await axios.post(`${API_URL}/generate-pptx`, {
                 contenu,
                 specialite: formParams?.specialite || '',
                 module: formParams?.module || '',
                 chapitre: formParams?.chapitre || '',
-            }, { timeout: 60000 })
-            window.open(response.data.editor_url, '_blank')
+                niveau: formParams?.niveau || '',
+            }, { timeout: 60000, responseType: 'blob' })
+
+            const url = URL.createObjectURL(new Blob([response.data]))
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}.pptx`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
         } catch (err) {
-            const msg = err.response?.data?.detail || 'Erreur lors de la génération des slides.'
-            setSlidesError(msg)
-            setTimeout(() => setSlidesError(null), 5000)
+            const msg = err.response?.data?.detail || 'Erreur lors de la génération du PowerPoint.'
+            setPptxError(msg)
+            setTimeout(() => setPptxError(null), 5000)
         } finally {
-            setSlidesLoading(false)
+            setPptxLoading(false)
         }
     }
 
@@ -173,14 +182,14 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                         </button>
                     </div>
 
-                    {/* Bouton Générer les slides */}
+                    {/* Bouton Export PowerPoint */}
                     <button
-                        onClick={handleGenerateSlides}
-                        disabled={slidesLoading}
+                        onClick={handleGeneratePptx}
+                        disabled={pptxLoading}
                         className="btn-secondary"
-                        title="Générer une présentation Beautiful.ai"
+                        title="Télécharger la présentation en PowerPoint (.pptx)"
                     >
-                        {slidesLoading ? (
+                        {pptxLoading ? (
                             <>
                                 <div className="loading-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
                                 Génération...
@@ -188,11 +197,10 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                         ) : (
                             <>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="2" y="3" width="20" height="14" rx="2" />
-                                    <path d="M8 21h8M12 17v4" />
-                                    <path d="M7 8h10M7 12h6" />
+                                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                                    <polyline points="13,2 13,9 20,9" />
                                 </svg>
-                                Générer les slides
+                                Export PowerPoint
                             </>
                         )}
                     </button>
@@ -250,15 +258,15 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                     </div>
                 )}
 
-                {/* Erreur slides */}
-                {slidesError && (
+                {/* Erreur PowerPoint */}
+                {pptxError && (
                     <div className="error-message mt-3 text-xs">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <circle cx="12" cy="12" r="10" />
                             <line x1="15" y1="9" x2="9" y2="15" />
                             <line x1="9" y1="9" x2="15" y2="15" />
                         </svg>
-                        {slidesError}
+                        {pptxError}
                     </div>
                 )}
             </div>

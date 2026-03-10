@@ -14,12 +14,14 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from enum import Enum
 
 from prompt_builder import build_system_prompt, build_user_message, build_system_prompt_light, build_user_message_light, build_quiz_prompt, build_quiz_user_message
 from ai_engines import generate_with_mistral, generate_with_claude, generate_with_groq, generate_with_oxlo
 from slides_builder import markdown_to_slides_prompt
+from pptx_builder import markdown_to_pptx
 
 # --- Historique (fichier JSON) ---
 
@@ -97,6 +99,14 @@ class SlidesRequest(BaseModel):
 class SlidesResponse(BaseModel):
     editor_url: str = Field(..., description="URL de la présentation Beautiful.ai")
     slides_prompt: str = Field(..., description="Prompt structuré envoyé à Beautiful.ai")
+
+
+class PptxRequest(BaseModel):
+    contenu: str = Field(..., description="Contenu du cours en Markdown")
+    specialite: str = Field(..., description="Spécialité académique")
+    module: str = Field(..., description="Nom du module")
+    chapitre: str = Field(..., description="Titre du chapitre")
+    niveau: str = Field(default='', description="Niveau d'études")
 
 
 class MoteurQuiz(str, Enum):
@@ -268,6 +278,31 @@ async def generate_slides(request: SlidesRequest):
         )
 
     return SlidesResponse(editor_url=editor_url, slides_prompt=slides_prompt)
+
+
+@app.post("/generate-pptx")
+async def generate_pptx(request: PptxRequest):
+    """
+    Convertit un cours Markdown en fichier PowerPoint (.pptx) téléchargeable.
+    """
+    try:
+        pptx_bytes = markdown_to_pptx(
+            contenu=request.contenu,
+            specialite=request.specialite,
+            module=request.module,
+            chapitre=request.chapitre,
+            niveau=request.niveau,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la génération du PowerPoint : {str(e)}")
+
+    filename = request.chapitre[:60].replace(' ', '_').replace('/', '-') + '.pptx'
+
+    return StreamingResponse(
+        iter([pptx_bytes]),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/generate-quiz", response_model=QuizResponse)
