@@ -280,11 +280,40 @@ async def generate_slides(request: SlidesRequest):
     return SlidesResponse(editor_url=editor_url, slides_prompt=slides_prompt)
 
 
+async def _fetch_unsplash_image(query: str) -> tuple:
+    """Récupère une image Unsplash (bytes, photographer_name) pour le mot-clé donné."""
+    api_key = os.getenv("UNSPLASH_ACCESS_KEY", "")
+    if not api_key or api_key == "votre_cle_unsplash_ici":
+        return None, None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.unsplash.com/photos/random",
+                params={"query": query, "orientation": "landscape"},
+                headers={"Authorization": f"Client-ID {api_key}"},
+            )
+            if resp.status_code != 200:
+                return None, None
+            data = resp.json()
+            img_url = data["urls"]["regular"]
+            photographer = data["user"]["name"]
+            img_resp = await client.get(img_url, timeout=15.0)
+            if img_resp.status_code != 200:
+                return None, None
+            return img_resp.content, photographer
+    except Exception:
+        return None, None
+
+
 @app.post("/generate-pptx")
 async def generate_pptx(request: PptxRequest):
     """
     Convertit un cours Markdown en fichier PowerPoint (.pptx) téléchargeable.
     """
+    # Image Unsplash optionnelle — ne bloque pas si indisponible
+    query = f"{request.specialite} {request.chapitre}"
+    image_bytes, photographer = await _fetch_unsplash_image(query)
+
     try:
         pptx_bytes = markdown_to_pptx(
             contenu=request.contenu,
@@ -292,6 +321,8 @@ async def generate_pptx(request: PptxRequest):
             module=request.module,
             chapitre=request.chapitre,
             niveau=request.niveau,
+            title_image=image_bytes,
+            photographer=photographer or '',
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la génération du PowerPoint : {str(e)}")

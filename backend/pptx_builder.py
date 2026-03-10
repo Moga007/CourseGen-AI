@@ -10,6 +10,8 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from pptx.oxml.ns import qn
+from lxml import etree
 
 # ═══════════════════════════════════════════════════════
 #  PALETTE
@@ -205,6 +207,26 @@ def _add_runs(para, raw_text: str, size_pt: int, color: RGBColor, base_bold=Fals
         _run_fmt(run, size_pt, color, bold=(base_bold or is_bold))
 
 
+def _add_transparent_rect(slide, left, top, width, height, color: RGBColor, opacity: int):
+    """Rectangle avec transparence. opacity: 0=invisible, 100=opaque (%)."""
+    s = slide.shapes.add_shape(1, Inches(left), Inches(top), Inches(width), Inches(height))
+    s.line.fill.background()
+    sp = s._element
+    spPr = sp.find(qn('p:spPr'))
+    # Remplace le fill existant par un solidFill avec alpha
+    for child in list(spPr):
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag in ('solidFill', 'gradFill', 'pattFill', 'noFill', 'blipFill'):
+            spPr.remove(child)
+    ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+    solid = etree.SubElement(spPr, f'{{{ns}}}solidFill')
+    clr   = etree.SubElement(solid, f'{{{ns}}}srgbClr')
+    clr.set('val', f'{color[0]:02X}{color[1]:02X}{color[2]:02X}')
+    alpha = etree.SubElement(clr, f'{{{ns}}}alpha')
+    alpha.set('val', str(opacity * 1000))   # 100000 = 100% opaque
+    return s
+
+
 def _section_badge(slide, label: str, left: float, top: float):
     """Badge pill arrondi pour l'étiquette de section."""
     badge_w = min(len(label) * 0.085 + 0.4, 5.0)
@@ -222,7 +244,8 @@ def _section_badge(slide, label: str, left: float, top: float):
 #  SLIDE TITRE – Design splitté
 # ═══════════════════════════════════════════════════════
 
-def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: str):
+def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: str,
+                      title_image: bytes = None, photographer: str = ''):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_bg(slide, C_BG)
 
@@ -234,14 +257,12 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     _rect(slide, 0, 5.58, 4.4, 0.04, C_ACCENT2)
 
     # ── Déco panneau gauche ───────────────────────────
-    # Cercle semi-transparent en haut du panneau
     circ = slide.shapes.add_shape(9, Inches(2.8), Inches(-1.0), Inches(3.0), Inches(3.0))
     circ.fill.solid()
     circ.fill.fore_color.rgb = C_ACCENT_DARK
     _no_line(circ)
 
     # ── Textes panneau gauche ─────────────────────────
-    # Spécialité
     tb_spec = _tb(slide, 0.35, 1.4, 3.7, 0.5)
     tf = tb_spec.text_frame
     tf.word_wrap = True
@@ -250,11 +271,9 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     run.text = specialite.upper()
     _run_fmt(run, 13, C_WHITE, bold=True)
 
-    # Ligne déco sous spécialité
     _rect(slide, 0.35, 2.0, 1.2, 0.04, C_WHITE)
 
-    # Niveau – badge arrondi
-    badge = _rounded_rect(slide, 0.35, 2.2, 1.5, 0.38, C_ACCENT_DARK)
+    _rounded_rect(slide, 0.35, 2.2, 1.5, 0.38, C_ACCENT_DARK)
     tb_niv = _tb(slide, 0.45, 2.25, 1.3, 0.3)
     p2 = tb_niv.text_frame.paragraphs[0]
     p2.alignment = PP_ALIGN.LEFT
@@ -262,7 +281,6 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     run2.text = f"NIVEAU {niveau.upper()}"
     _run_fmt(run2, 11, C_ACCENT2, bold=True)
 
-    # Module (bas du panneau)
     tb_mod = _tb(slide, 0.35, 5.75, 3.7, 0.9)
     tf_mod = tb_mod.text_frame
     tf_mod.word_wrap = True
@@ -271,14 +289,28 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     run3.text = module
     _run_fmt(run3, 12, RGBColor(0xC7, 0xD2, 0xFE), italic=True)
 
-    # ── Panneau droit : titre principal ───────────────
-    # Déco : grand cercle en bas à droite
-    circ2 = slide.shapes.add_shape(9, Inches(9.5), Inches(4.5), Inches(4.5), Inches(4.5))
-    circ2.fill.solid()
-    circ2.fill.fore_color.rgb = C_ACCENT_DARK
-    _no_line(circ2)
+    # ── Panneau droit : image ou déco ─────────────────
+    RIGHT_L = 4.4
+    RIGHT_W = 13.33 - RIGHT_L   # 8.93"
 
-    # Titre
+    if title_image:
+        # Image de fond sur tout le panneau droit
+        slide.shapes.add_picture(
+            BytesIO(title_image),
+            Inches(RIGHT_L), Inches(0), Inches(RIGHT_W), Inches(7.5)
+        )
+        # Overlay sombre pour lisibilité du texte (70% opaque)
+        _add_transparent_rect(slide, RIGHT_L, 0, RIGHT_W, 7.5, C_BG, 70)
+        # Gradient plus dense en bas (bande titre)
+        _add_transparent_rect(slide, RIGHT_L, 4.5, RIGHT_W, 3.0, C_BG, 85)
+    else:
+        # Déco par défaut : grand cercle sombre
+        circ2 = slide.shapes.add_shape(9, Inches(9.5), Inches(4.5), Inches(4.5), Inches(4.5))
+        circ2.fill.solid()
+        circ2.fill.fore_color.rgb = C_ACCENT_DARK
+        _no_line(circ2)
+
+    # Titre principal
     tb_title = _tb(slide, 4.75, 1.5, 8.2, 4.2)
     tf_title = tb_title.text_frame
     tf_title.word_wrap = True
@@ -289,6 +321,15 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
 
     # Ligne déco sous titre
     _rect(slide, 4.75, 6.1, 2.0, 0.05, C_ACCENT)
+
+    # Attribution photographe Unsplash (obligatoire)
+    if title_image and photographer:
+        tb_photo = _tb(slide, RIGHT_L + 0.15, 7.2, RIGHT_W - 0.3, 0.28)
+        p_ph = tb_photo.text_frame.paragraphs[0]
+        p_ph.alignment = PP_ALIGN.RIGHT
+        run_ph = p_ph.add_run()
+        run_ph.text = f"Photo: {photographer} / Unsplash"
+        _run_fmt(run_ph, 7, C_TEXT_MUTED)
 
     return slide
 
@@ -585,12 +626,14 @@ def _make_key_points_slide(prs, points: list[str]):
 # ═══════════════════════════════════════════════════════
 
 def markdown_to_pptx(contenu: str, specialite: str, module: str,
-                     chapitre: str, niveau: str = '') -> bytes:
+                     chapitre: str, niveau: str = '',
+                     title_image: bytes = None, photographer: str = '') -> bytes:
     prs = Presentation()
     prs.slide_width  = SLIDE_W
     prs.slide_height = SLIDE_H
 
-    _make_title_slide(prs, specialite, module, chapitre, niveau)
+    _make_title_slide(prs, specialite, module, chapitre, niveau,
+                      title_image=title_image, photographer=photographer)
 
     SKIP      = {'tableau comparatif', 'synthèse visuelle', 'pour aller plus loin'}
     SEC_DEF   = {'définitions des concepts clés', 'définitions'}
