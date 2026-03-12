@@ -9,14 +9,11 @@ def get_niveau_description(niveau: str) -> str:
     niveau_upper = niveau.strip().upper()
 
     niveau_map = {
-        "L1": "première année de licence (débutant universitaire, introduction aux concepts fondamentaux, vocabulaire accessible, nombreux exemples simples)",
-        "L2": "deuxième année de licence (notions intermédiaires, consolidation des bases, exemples appliqués)",
-        "L3": "troisième année de licence (niveau avancé pré-master, approfondissement des concepts, études de cas complexes)",
-        "M1": "première année de master (niveau avancé, analyse critique, mise en perspective avec la recherche, références académiques)",
-        "M2": "deuxième année de master (niveau expert, état de l'art, problématiques de recherche actuelles, analyse approfondie)",
-        "B1": "première année (niveau débutant, introduction progressive, pédagogie très guidée)",
-        "B2": "deuxième année (niveau intermédiaire, renforcement des acquis)",
-        "B3": "troisième année (niveau avancé, préparation à la spécialisation)",
+        "B1": "1ʳᵉ année Bachelor (niveau débutant, introduction aux concepts fondamentaux, vocabulaire accessible, nombreux exemples concrets et progressifs)",
+        "B2": "2ᵉ année Bachelor (niveau intermédiaire, consolidation des bases, approfondissement des notions clés, exemples appliqués au domaine)",
+        "B3": "3ᵉ année Bachelor (niveau avancé, maîtrise opérationnelle, études de cas complexes, préparation à la spécialisation Master)",
+        "M1": "1ʳᵉ année Master (niveau avancé, analyse critique, mise en perspective avec la recherche, références académiques et professionnelles)",
+        "M2": "2ᵉ année Master (niveau expert, état de l'art, problématiques de recherche actuelles, analyse approfondie, vision stratégique)",
     }
 
     return niveau_map.get(
@@ -116,7 +113,7 @@ INSTRUCTIONS STRICTES :
 4. **Adapte le niveau de langage** :
    - Vocabulaire disciplinaire rigoureux et approprié au niveau {niveau}.
    - Profondeur d'analyse et complexité des exemples cohérentes avec le niveau d'études.
-   - Pour L1/L2 : expliquer chaque concept introduit ; pour M1/M2 : supposer des bases solides et aller en profondeur.
+   - Pour B1/B2 : expliquer chaque concept introduit ; pour B3/M1/M2 : supposer des bases solides et aller en profondeur.
 
 5. **Qualité académique** :
    - Rigueur scientifique et factuelle absolue.
@@ -187,7 +184,7 @@ def build_quiz_prompt(specialite: str, niveau: str, module: str, chapitre: str) 
     Construit le prompt pour générer un quiz au format GIFT à partir d'un cours.
 
     Le format GIFT est le format d'import natif de Moodle.
-    Génère un mix de QCM, Vrai/Faux et réponses courtes.
+    Génère uniquement des QCM et des questions Vrai/Faux.
     """
     niveau_desc = get_niveau_description(niveau)
 
@@ -207,17 +204,17 @@ Génère entre 10 et 20 questions au total, en adaptant le nombre à la complexi
 - Un chapitre dense, technique ou multi-notions → 17 à 20 questions
 
 Répartis les questions ainsi (proportionnellement au total choisi) :
-- ~50% de QCM avec 4 options dont une seule correcte
-- ~25% de questions Vrai/Faux
-- ~25% de questions à réponse courte (mot ou expression précise)
+- ~70% de QCM avec 4 options dont une seule correcte
+- ~30% de questions Vrai/Faux
+
+N'utilise AUCUNE question à réponse courte, à réponse ouverte ou à saisie de texte.
 
 RÈGLES DU FORMAT GIFT :
 1. Chaque question commence par un titre entre :: ::
 2. QCM : la bonne réponse est préfixée par = , les mauvaises par ~
 3. Vrai/Faux : réponse entre accolades : {{TRUE}} ou {{FALSE}}
-4. Réponse courte : la bonne réponse entre accolades avec = : {{=réponse}}
-5. Sépare chaque question par une ligne vide
-6. Ajoute un commentaire de section avec // avant chaque groupe
+4. Sépare chaque question par une ligne vide
+5. Ajoute un commentaire de section avec // avant chaque groupe
 
 EXEMPLE DE FORMAT ATTENDU :
 
@@ -230,10 +227,7 @@ EXEMPLE DE FORMAT ATTENDU :
 }}
 
 // Vrai/Faux
-::Q7:: Affirmation à évaluer. {{TRUE}}
-
-// Réponse courte
-::Q10:: Quel terme désigne... ? {{=terme exact}}
+::Q8:: Affirmation à évaluer. {{TRUE}}
 
 IMPORTANT :
 - Les questions doivent couvrir l'ensemble du chapitre (pas seulement une partie)
@@ -248,6 +242,6 @@ def build_quiz_user_message(specialite: str, niveau: str, module: str, chapitre:
     return (
         f"Génère le quiz complet au format GIFT pour le chapitre \"{chapitre}\" "
         f"du module \"{module}\" en {specialite}, niveau {niveau}. "
-        f"Entre 10 et 20 questions variées (QCM, Vrai/Faux, réponses courtes) selon la complexité du chapitre, "
+        f"Entre 10 et 20 questions (QCM et Vrai/Faux uniquement) selon la complexité du chapitre, "
         f"couvrant l'ensemble du chapitre, format GIFT strict prêt à importer dans Moodle."
     )

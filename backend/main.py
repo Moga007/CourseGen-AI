@@ -3,8 +3,10 @@ CourseGen AI — Backend FastAPI
 Système de génération automatique de cours académiques par IA.
 """
 
+import asyncio
 import json
 import os
+import re
 import time
 import string
 import random
@@ -305,14 +307,47 @@ async def _fetch_unsplash_image(query: str) -> tuple:
         return None, None
 
 
+_SKIP_SECTIONS = {'tableau comparatif', 'synthèse visuelle', 'pour aller plus loin'}
+_SEC_DEF        = {'définitions des concepts clés', 'définitions'}
+_SEC_PTS        = {'points importants à retenir', 'points clés', 'à retenir'}
+
+
+def _get_section_titles(contenu: str) -> list[str]:
+    """Retourne les titres ## qui génèrent une slide de section (même filtrage que pptx_builder)."""
+    titles = []
+    for section in re.split(r'\n(?=## )', contenu):
+        section = section.strip()
+        if not section.startswith('##'):
+            continue
+        h2_title = re.sub(r'\*\*(.+?)\*\*', r'\1', section.split('\n')[0].lstrip('#')).strip()
+        lower = h2_title.lower()
+        if any(kw in lower for kw in _SKIP_SECTIONS):
+            continue
+        if any(kw in lower for kw in _SEC_DEF):
+            continue
+        if any(kw in lower for kw in _SEC_PTS):
+            continue
+        titles.append(h2_title)
+    return titles
+
+
 @app.post("/generate-pptx")
 async def generate_pptx(request: PptxRequest):
     """
     Convertit un cours Markdown en fichier PowerPoint (.pptx) téléchargeable.
     """
-    # Image Unsplash optionnelle — ne bloque pas si indisponible
-    query = f"{request.specialite} {request.chapitre}"
-    image_bytes, photographer = await _fetch_unsplash_image(query)
+    # Récupère les titres de sections pour les images
+    section_titles = _get_section_titles(request.contenu)
+
+    # Fetch image titre + images de sections en parallèle
+    title_query    = f"{request.specialite} {request.chapitre}"
+    section_queries = [f"{request.specialite} {t}" for t in section_titles]
+    all_results = await asyncio.gather(
+        _fetch_unsplash_image(title_query),
+        *[_fetch_unsplash_image(q) for q in section_queries]
+    )
+    image_bytes, photographer = all_results[0]
+    section_images = list(all_results[1:])
 
     try:
         pptx_bytes = markdown_to_pptx(
@@ -323,6 +358,7 @@ async def generate_pptx(request: PptxRequest):
             niveau=request.niveau,
             title_image=image_bytes,
             photographer=photographer or '',
+            section_images=section_images,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la génération du PowerPoint : {str(e)}")

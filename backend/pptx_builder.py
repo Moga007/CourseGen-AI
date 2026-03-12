@@ -338,42 +338,84 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
 #  SLIDE DE SECTION – Fond bicolore
 # ═══════════════════════════════════════════════════════
 
-def _make_section_slide(prs, title: str, numero: int = 0):
+def _make_section_slide(prs, title: str, numero: int = 0,
+                        section_image: bytes = None, photographer: str = ''):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _set_bg(slide, C_ACCENT)
 
-    # Bande sombre en haut
-    _rect(slide, 0, 0, 13.33, 1.1, C_ACCENT_DARK)
-    # Bande sombre en bas
-    _rect(slide, 0, 6.3, 13.33, 1.2, C_ACCENT_DARK)
-    # Ligne de séparation haute
-    _rect(slide, 0, 1.08, 13.33, 0.04, C_ACCENT2)
-    # Ligne de séparation basse
-    _rect(slide, 0, 6.28, 13.33, 0.04, C_ACCENT2)
+    SPLIT   = 6.0               # largeur panneau gauche quand image présente
+    RIGHT_W = 13.33 - SPLIT     # 7.33"
 
-    # Grand chiffre romain en fond (watermark)
-    if 0 < numero <= len(CHIFFRES_ROMAINS):
-        tb_num = _tb(slide, 7.5, 0.5, 5.5, 6.0)
-        tf = tb_num.text_frame
-        p = tf.paragraphs[0]
-        p.alignment = PP_ALIGN.RIGHT
-        run = p.add_run()
-        run.text = CHIFFRES_ROMAINS[numero - 1]
-        _run_fmt(run, 200, RGBColor(0x7C, 0x7F, 0xF5), bold=True)
+    if section_image:
+        _set_bg(slide, C_ACCENT_DARK)
 
-    # Petite étiquette "SECTION X" en haut
+        # ── Panneau gauche violet ──────────────────────────
+        _rect(slide, 0, 0, SPLIT, 7.5, C_ACCENT)
+        _rect(slide, 0, 0, SPLIT, 1.1, C_ACCENT_DARK)
+        _rect(slide, 0, 6.3, SPLIT, 1.2, C_ACCENT_DARK)
+        _rect(slide, 0, 1.08, SPLIT, 0.04, C_ACCENT2)
+        _rect(slide, 0, 6.28, SPLIT, 0.04, C_ACCENT2)
+
+        # ── Panneau droit : image + overlay ───────────────
+        slide.shapes.add_picture(
+            BytesIO(section_image),
+            Inches(SPLIT), Inches(0), Inches(RIGHT_W), Inches(7.5)
+        )
+        _add_transparent_rect(slide, SPLIT, 0, RIGHT_W, 7.5, C_BG, 45)
+
+        # Grand chiffre romain watermark (droite)
+        if 0 < numero <= len(CHIFFRES_ROMAINS):
+            tb_num = _tb(slide, SPLIT + 0.2, 0.3, RIGHT_W - 0.3, 6.5)
+            tf = tb_num.text_frame
+            p = tf.paragraphs[0]
+            p.alignment = PP_ALIGN.RIGHT
+            run = p.add_run()
+            run.text = CHIFFRES_ROMAINS[numero - 1]
+            _run_fmt(run, 180, RGBColor(0xA0, 0xA3, 0xFF), bold=True)
+
+        # Attribution photographe
+        if photographer:
+            tb_photo = _tb(slide, SPLIT + 0.15, 7.2, RIGHT_W - 0.3, 0.28)
+            p_ph = tb_photo.text_frame.paragraphs[0]
+            p_ph.alignment = PP_ALIGN.RIGHT
+            run_ph = p_ph.add_run()
+            run_ph.text = f"Photo: {photographer} / Unsplash"
+            _run_fmt(run_ph, 7, C_TEXT_MUTED)
+
+        title_w   = SPLIT - 0.6
+        font_size = 36
+
+    else:
+        # ── Design original plein écran ───────────────────
+        _set_bg(slide, C_ACCENT)
+        _rect(slide, 0, 0, 13.33, 1.1, C_ACCENT_DARK)
+        _rect(slide, 0, 6.3, 13.33, 1.2, C_ACCENT_DARK)
+        _rect(slide, 0, 1.08, 13.33, 0.04, C_ACCENT2)
+        _rect(slide, 0, 6.28, 13.33, 0.04, C_ACCENT2)
+
+        if 0 < numero <= len(CHIFFRES_ROMAINS):
+            tb_num = _tb(slide, 7.5, 0.5, 5.5, 6.0)
+            tf = tb_num.text_frame
+            p = tf.paragraphs[0]
+            p.alignment = PP_ALIGN.RIGHT
+            run = p.add_run()
+            run.text = CHIFFRES_ROMAINS[numero - 1]
+            _run_fmt(run, 200, RGBColor(0x7C, 0x7F, 0xF5), bold=True)
+
+        title_w   = 10.0
+        font_size = 40
+
+    # ── Textes communs (panneau gauche) ───────────────────
     tb_lbl = _tb(slide, 0.6, 0.3, 5, 0.45)
     p_lbl = tb_lbl.text_frame.paragraphs[0]
     run_lbl = p_lbl.add_run()
     run_lbl.text = f"SECTION {CHIFFRES_ROMAINS[numero - 1]}" if 0 < numero <= len(CHIFFRES_ROMAINS) else "SECTION"
     _run_fmt(run_lbl, 11, RGBColor(0xC7, 0xD2, 0xFE))
 
-    # Titre de section
-    tb = _tb(slide, 0.6, 1.5, 10.0, 4.5)
+    tb = _tb(slide, 0.6, 1.5, title_w, 4.5)
     tf = tb.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 40, C_WHITE, base_bold=True)
+    _add_runs(p, title, font_size, C_WHITE, base_bold=True)
     p.alignment = PP_ALIGN.LEFT
 
     return slide
@@ -627,7 +669,8 @@ def _make_key_points_slide(prs, points: list[str]):
 
 def markdown_to_pptx(contenu: str, specialite: str, module: str,
                      chapitre: str, niveau: str = '',
-                     title_image: bytes = None, photographer: str = '') -> bytes:
+                     title_image: bytes = None, photographer: str = '',
+                     section_images: list = None) -> bytes:
     prs = Presentation()
     prs.slide_width  = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -669,7 +712,13 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             continue
 
         section_counter += 1
-        _make_section_slide(prs, h2_title, numero=section_counter)
+        sec_img, sec_photo = (
+            section_images[section_counter - 1]
+            if section_images and section_counter - 1 < len(section_images)
+            else (None, '')
+        )
+        _make_section_slide(prs, h2_title, numero=section_counter,
+                            section_image=sec_img, photographer=sec_photo or '')
 
         subsections    = [s.strip() for s in re.split(r'\n(?=### )', section_body) if s.strip()]
         has_subsections = any(s.startswith('###') for s in subsections)
