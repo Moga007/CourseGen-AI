@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import axios from 'axios'
 import Header from './components/Header'
 import CourseForm from './components/CourseForm'
 import CourseDisplay from './components/CourseDisplay'
@@ -14,30 +13,64 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [replayData, setReplayData] = useState(null)
+  const [streamingContent, setStreamingContent] = useState('')
 
   const handleGenerate = async (formData) => {
     setIsLoading(true)
     setError(null)
     setCourseData(null)
+    setStreamingContent('')
     setLastFormData(formData)
 
     try {
-      const response = await axios.post(`${API_URL}/generate`, formData, {
-        timeout: 720000, // 12 minutes max (contenu enrichi + continuations automatiques)
+      const response = await fetch(`${API_URL}/generate/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
       })
-      setCourseData(response.data)
-      // Rafraîchir l'historique
-      if (window.__refreshHistorique) window.__refreshHistorique()
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.detail || 'Erreur lors de la génération.')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulated = ''
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        // Accumule les bytes reçus (les chunks SSE peuvent arriver fragmentés)
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() // garde la ligne incomplète pour le prochain tour
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.chunk !== undefined) {
+              if (accumulated === '') setIsLoading(false) // cache le spinner dès le 1er token
+              accumulated += data.chunk
+              setStreamingContent(accumulated)
+            } else if (data.done) {
+              setCourseData({ contenu: accumulated, moteur_utilise: data.moteur_utilise })
+              setStreamingContent('')
+              if (window.__refreshHistorique) window.__refreshHistorique()
+            } else if (data.error) {
+              setError(data.error)
+            }
+          } catch { /* ligne SSE malformée — on ignore */ }
+        }
+      }
     } catch (err) {
-      if (err.response) {
-        // Server responded with error
-        setError(err.response.data.detail || 'Une erreur est survenue lors de la génération.')
-      } else if (err.code === 'ECONNABORTED') {
-        setError('La requête a expiré. Veuillez réessayer.')
-      } else if (err.code === 'ERR_NETWORK') {
+      if (err.name === 'TypeError') {
         setError('Impossible de contacter le serveur. Vérifiez que le backend est lancé (python main.py).')
       } else {
-        setError('Une erreur inattendue est survenue. Veuillez réessayer.')
+        setError(err.message || 'Une erreur inattendue est survenue. Veuillez réessayer.')
       }
     } finally {
       setIsLoading(false)
@@ -68,15 +101,25 @@ function App() {
           </div>
         )}
 
-        {/* Loading */}
+        {/* Loading — visible jusqu'au 1er token reçu */}
         {isLoading && (
           <div className="glass-card">
             <LoadingSpinner moteur={lastFormData?.moteur} />
           </div>
         )}
 
-        {/* Course Result */}
-        {courseData && !isLoading && (
+        {/* Streaming en cours — affiche le contenu au fur et à mesure */}
+        {streamingContent && (
+          <CourseDisplay
+            contenu={streamingContent}
+            moteurUtilise={lastFormData?.moteur}
+            formParams={lastFormData}
+            isStreaming={true}
+          />
+        )}
+
+        {/* Course Result — affiché une fois le streaming terminé */}
+        {courseData && !isLoading && !streamingContent && (
           <CourseDisplay
             contenu={courseData.contenu}
             moteurUtilise={courseData.moteur_utilise}

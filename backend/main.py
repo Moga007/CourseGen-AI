@@ -19,7 +19,10 @@ from pydantic import BaseModel, Field
 from enum import Enum
 
 from prompt_builder import build_system_prompt, build_user_message, build_system_prompt_light, build_user_message_light, build_quiz_prompt, build_quiz_user_message
-from ai_engines import generate_with_mistral, generate_with_claude, generate_with_groq, generate_with_oxlo
+from ai_engines import (
+    generate_with_mistral, generate_with_claude, generate_with_groq, generate_with_oxlo,
+    stream_with_mistral, stream_with_claude, stream_with_groq, stream_with_oxlo,
+)
 from slides_builder import markdown_to_slides_prompt
 from pptx_builder import markdown_to_pptx
 
@@ -225,6 +228,95 @@ async def generate_course(request: GenerateRequest):
     _save_historique(historique)
 
     return GenerateResponse(contenu=contenu, moteur_utilise=moteur_utilise)
+
+
+@app.post("/generate/stream")
+async def generate_course_stream(request: GenerateRequest):
+    """
+    Génère un cours en streaming SSE (Server-Sent Events).
+    Envoie les tokens au fur et à mesure via text/event-stream.
+
+    Événements émis :
+    - `data: {"chunk": "..."}` — fragment de texte généré
+    - `data: {"done": true, "moteur_utilise": "..."}` — fin de génération
+    - `data: {"error": "..."}` — erreur
+    """
+    if request.moteur == MoteurIA.OXLO:
+        system_prompt = build_system_prompt_light(
+            specialite=request.specialite, niveau=request.niveau,
+            module=request.module, chapitre=request.chapitre,
+        )
+        user_message = build_user_message_light(
+            specialite=request.specialite, niveau=request.niveau,
+            module=request.module, chapitre=request.chapitre,
+        )
+    else:
+        system_prompt = build_system_prompt(
+            specialite=request.specialite, niveau=request.niveau,
+            module=request.module, chapitre=request.chapitre,
+        )
+        user_message = build_user_message(
+            specialite=request.specialite, niveau=request.niveau,
+            module=request.module, chapitre=request.chapitre,
+        )
+
+    moteur_labels = {
+        MoteurIA.MISTRAL: "Mistral Large (Mistral AI)",
+        MoteurIA.CLAUDE:  "Claude Sonnet (Anthropic)",
+        MoteurIA.GROQ:    "LLaMA 3.3 70B (Groq)",
+        MoteurIA.OXLO:    "Qwen 3 32B (Oxlo)",
+    }
+    moteur_utilise = moteur_labels[request.moteur]
+    start_time = time.time()
+
+    async def event_stream():
+        full_content = []
+        try:
+            if request.moteur == MoteurIA.MISTRAL:
+                gen = stream_with_mistral(system_prompt, user_message)
+            elif request.moteur == MoteurIA.CLAUDE:
+                gen = stream_with_claude(system_prompt, user_message)
+            elif request.moteur == MoteurIA.GROQ:
+                gen = stream_with_groq(system_prompt, user_message)
+            else:
+                gen = stream_with_oxlo(system_prompt, user_message)
+
+            async for chunk in gen:
+                full_content.append(chunk)
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+
+            # Sauvegarde dans l'historique après génération complète
+            duree = round(time.time() - start_time, 1)
+            entry = {
+                "id": _generate_id(),
+                "date": datetime.now().isoformat(timespec="seconds"),
+                "specialite": request.specialite,
+                "niveau": request.niveau,
+                "module": request.module,
+                "chapitre": request.chapitre,
+                "moteur": moteur_utilise,
+                "duree_secondes": duree,
+            }
+            historique = _load_historique()
+            historique.append(entry)
+            _save_historique(historique)
+
+            yield f"data: {json.dumps({'done': True, 'moteur_utilise': moteur_utilise})}\n\n"
+
+        except ValueError as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': f'Erreur API {request.moteur.value} : {str(e)}'})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/generate-slides", response_model=SlidesResponse)

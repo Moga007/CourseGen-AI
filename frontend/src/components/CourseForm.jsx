@@ -1,24 +1,54 @@
 import { useState, useEffect } from 'react'
 
-const NIVEAUX = [
-    { value: 'L1', label: 'L1 — 1ʳᵉ année Licence' },
-    { value: 'L2', label: 'L2 — 2ᵉ année Licence' },
-    { value: 'L3', label: 'L3 — 3ᵉ année Licence' },
-    { value: 'M1', label: 'M1 — 1ʳᵉ année Master' },
-    { value: 'M2', label: 'M2 — 2ᵉ année Master' },
+// Spécialités avec leurs niveaux autorisés
+const SPECIALITES = [
+    { value: 'GFC',  label: 'GFC — Gestion, Finance et Comptabilité',          niveaux: ['B1', 'B2', 'B3', 'M1', 'M2'] },
+    { value: 'RH',   label: 'RH — Ressources Humaines et Management',           niveaux: ['B1', 'B2', 'B3', 'M1', 'M2'] },
+    { value: 'IWA',  label: 'IWA — Informatique Web et Applicatif',              niveaux: ['B1', 'B2', 'B3'] },
+    { value: 'DIA',  label: 'DIA — Data Science et Intelligence Artificielle',   niveaux: ['B1', 'B2', 'B3', 'M1', 'M2'] },
+    { value: 'MCD',  label: 'MCD — Marketing et Communication Digitale',         niveaux: ['B1', 'B2', 'B3'] },
+    { value: 'GPE',  label: 'GPE — Gestion, Projet et Entrepreneuriat',          niveaux: ['M1', 'M2'] },
 ]
+
+// Labels affichés dans le select niveau
+const NIVEAUX_LABELS = {
+    B1: 'B1 — 1ʳᵉ année Bachelor',
+    B2: 'B2 — 2ᵉ année Bachelor',
+    B3: 'B3 — 3ᵉ année Bachelor',
+    M1: 'M1 — 1ʳᵉ année Master',
+    M2: 'M2 — 2ᵉ année Master',
+}
+
+// Groupes pour l'affichage (optgroup)
+const NIVEAUX_GROUPE = { B1: 'Bachelor', B2: 'Bachelor', B3: 'Bachelor', M1: 'Master', M2: 'Master' }
 
 export default function CourseForm({ onSubmit, isLoading, initialData }) {
     const [formData, setFormData] = useState({
         specialite: '',
-        niveau: 'L3',
+        niveau: '',
         module: '',
         chapitre: '',
         moteur: 'mistral',
     })
 
+    // Niveaux disponibles pour la spécialité sélectionnée
+    const specialiteSelectionnee = SPECIALITES.find(s => s.value === formData.specialite)
+    const niveauxDisponibles = specialiteSelectionnee ? specialiteSelectionnee.niveaux : []
+
+    // Grouper les niveaux disponibles par Bachelor / Master
+    const niveauxGroupes = ['Bachelor', 'Master'].map(groupe => ({
+        groupe,
+        options: niveauxDisponibles.filter(n => NIVEAUX_GROUPE[n] === groupe),
+    })).filter(g => g.options.length > 0)
+
     const handleChange = (e) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value })
+        const { name, value } = e.target
+        if (name === 'specialite') {
+            const spec = SPECIALITES.find(s => s.value === value)
+            setFormData({ ...formData, specialite: value, niveau: spec ? spec.niveaux[0] : '' })
+        } else {
+            setFormData({ ...formData, [name]: value })
+        }
     }
 
     const handleSubmit = (e) => {
@@ -33,7 +63,7 @@ export default function CourseForm({ onSubmit, isLoading, initialData }) {
         }
     }, [initialData])
 
-    const isFormValid = formData.specialite && formData.module && formData.chapitre
+    const isFormValid = formData.specialite && formData.niveau && formData.module && formData.chapitre
 
     return (
         <form onSubmit={handleSubmit} className="glass-card p-6 sm:p-8 animate-fade-in-up-delay">
@@ -59,16 +89,19 @@ export default function CourseForm({ onSubmit, isLoading, initialData }) {
                 {/* Spécialité */}
                 <div>
                     <label htmlFor="specialite" className="form-label">Spécialité</label>
-                    <input
-                        type="text"
+                    <select
                         id="specialite"
                         name="specialite"
-                        className="form-input"
-                        placeholder="Ex : Informatique, Droit, Médecine..."
+                        className="form-select"
                         value={formData.specialite}
                         onChange={handleChange}
                         required
-                    />
+                    >
+                        <option value="" disabled>Choisir une spécialité…</option>
+                        {SPECIALITES.map(s => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                    </select>
                 </div>
 
                 {/* Niveau */}
@@ -80,9 +113,17 @@ export default function CourseForm({ onSubmit, isLoading, initialData }) {
                         className="form-select"
                         value={formData.niveau}
                         onChange={handleChange}
+                        disabled={!formData.specialite}
                     >
-                        {NIVEAUX.map(n => (
-                            <option key={n.value} value={n.value}>{n.label}</option>
+                        {!formData.specialite && (
+                            <option value="" disabled>Choisir d'abord une spécialité</option>
+                        )}
+                        {niveauxGroupes.map(g => (
+                            <optgroup key={g.groupe} label={g.groupe}>
+                                {g.options.map(n => (
+                                    <option key={n} value={n}>{NIVEAUX_LABELS[n]}</option>
+                                ))}
+                            </optgroup>
                         ))}
                     </select>
                 </div>
