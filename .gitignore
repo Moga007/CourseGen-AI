@@ -3,6 +3,16 @@
 *.env.local
 historique.json
 
+# Base de données locale
+backend/coursegen.db
+backend/*.json.migrated
+
+# Claude Code
+.claude/
+
+# Tests
+.pytest_cache/
+
 # Python
 __pycache__/
 *.pyc
