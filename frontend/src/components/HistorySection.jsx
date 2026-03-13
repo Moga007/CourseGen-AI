@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-export default function HistorySection({ onReplay }) {
+export default function HistorySection({ onReplay, refreshKey = 0 }) {
     const [historique, setHistorique] = useState([])
     const [isLoading, setIsLoading] = useState(true)
     const [expanded, setExpanded] = useState(false)
@@ -23,13 +23,7 @@ export default function HistorySection({ onReplay }) {
 
     useEffect(() => {
         fetchHistorique()
-    }, [])
-
-    // Permet à App.jsx de rafraîchir l'historique après une génération
-    useEffect(() => {
-        window.__refreshHistorique = fetchHistorique
-        return () => { delete window.__refreshHistorique }
-    }, [])
+    }, [refreshKey])
 
     const formatDate = (isoDate) => {
         const d = new Date(isoDate)

@@ -5,7 +5,7 @@ import CourseDisplay from './components/CourseDisplay'
 import LoadingSpinner from './components/LoadingSpinner'
 import HistorySection from './components/HistorySection'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function App() {
   const [courseData, setCourseData] = useState(null)
@@ -14,6 +14,7 @@ function App() {
   const [error, setError] = useState(null)
   const [replayData, setReplayData] = useState(null)
   const [streamingContent, setStreamingContent] = useState('')
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
 
   const handleGenerate = async (formData) => {
     setIsLoading(true)
@@ -59,7 +60,7 @@ function App() {
             } else if (data.done) {
               setCourseData({ contenu: accumulated, moteur_utilise: data.moteur_utilise })
               setStreamingContent('')
-              if (window.__refreshHistorique) window.__refreshHistorique()
+              setHistoryRefreshKey(prev => prev + 1)
             } else if (data.error) {
               setError(data.error)
             }
@@ -149,7 +150,7 @@ function App() {
         )}
 
         {/* History */}
-        <HistorySection onReplay={handleReplay} />
+        <HistorySection onReplay={handleReplay} refreshKey={historyRefreshKey} />
       </main>
 
       {/* Bottom bar */}
