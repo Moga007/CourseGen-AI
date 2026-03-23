@@ -4,6 +4,7 @@ Gère l'exécution séquentielle, la validation JSON par agent, et le retry auto
 """
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal
@@ -92,31 +93,53 @@ def _build_markdown_from_redacteur(ctx: dict) -> str:
     # Applications pratiques
     appli = red.get("applications_pratiques", "")
     if appli:
-        lines.append(f"\n\n{appli}")
+        lines.append(f"\n\n## IV. Applications Pratiques\n\n{appli}")
 
-    # Définitions
+    # Définitions / Glossaire
     definitions = red.get("definitions", {})
     if definitions:
         lines.append("\n\n## Glossaire\n")
         for terme, defn in definitions.items():
-            lines.append(f"- **{terme}** : {defn}")
+            lines.append(f"\n**{terme}** : {defn}")
 
     # Points clés
     points = red.get("points_cles", [])
     if points:
-        lines.append("\n\n## Points Clés\n")
+        lines.append("\n\n## Points Clés à Retenir\n")
         for point in points:
-            lines.append(point)
+            lines.append(f"\n{point}")
+
+    # Questions de révision
+    questions = red.get("questions_revision", [])
+    if questions:
+        lines.append("\n\n## Questions de Révision\n")
+        for i, q in enumerate(questions, 1):
+            lines.append(f"\n{i}. {q}")
+
+    # Pour aller plus loin
+    plus_loin = red.get("pour_aller_plus_loin", [])
+    if plus_loin:
+        lines.append("\n\n## Pour Aller Plus Loin\n")
+        for piste in plus_loin:
+            lines.append(f"\n- {piste}")
 
     return "\n".join(lines)
+
+
+def _remove_trailing_commas(text: str) -> str:
+    """Supprime les virgules traînantes avant } ou ] — erreur fréquente des LLMs.
+    Ex : ["item1", "item2",]  →  ["item1", "item2"]
+    """
+    return re.sub(r',\s*([}\]])', r'\1', text)
 
 
 def _extract_json(raw: str) -> dict:
     """Extrait le JSON d'une réponse LLM avec plusieurs niveaux de récupération :
     1. Parse direct
-    2. Recherche du premier { (ignore le texte préambule)
-    3. Nettoyage des caractères de contrôle dans les strings
-    4. Réparation d'un JSON tronqué (dépassement de tokens)
+    2. Suppression des virgules traînantes (trailing commas)
+    3. Recherche du premier { (ignore le texte préambule)
+    4. Nettoyage des caractères de contrôle dans les strings
+    5. Réparation d'un JSON tronqué (dépassement de tokens)
     """
     text = raw.strip()
 
@@ -139,14 +162,21 @@ def _extract_json(raw: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # Tentative 2 : échapper les caractères de contrôle littéraux dans les strings
-    sanitized = _sanitize_control_chars(text)
+    # Tentative 2 : virgules traînantes (cas le plus fréquent avec Mistral)
+    cleaned = _remove_trailing_commas(text)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Tentative 3 : échapper les caractères de contrôle littéraux dans les strings
+    sanitized = _sanitize_control_chars(cleaned)
     try:
         return json.loads(sanitized)
     except json.JSONDecodeError:
         pass
 
-    # Tentative 3 : réparer un JSON tronqué en fermant les structures ouvertes
+    # Tentative 4 : réparer un JSON tronqué en fermant les structures ouvertes
     repaired = _repair_truncated_json(sanitized)
     return json.loads(repaired)
 
@@ -275,11 +305,12 @@ def _validate_agent_output(agent_name: str, data: dict) -> tuple[bool, str]:
                 )
 
     elif agent_name == "qualite":
-        for key in ["validation", "contenu_final_markdown", "slides_final"]:
+        # contenu_final_markdown est reconstruit par le runner, pas par l'agent
+        for key in ["validation", "slides_final"]:
             if key not in data:
                 return False, f"Clé manquante : '{key}'"
-        if len(data.get("contenu_final_markdown", "")) < 300:
-            return False, "contenu_final_markdown trop court (< 300 caractères)"
+        if "score_global" not in data.get("validation", {}):
+            return False, "Clé manquante : 'validation.score_global'"
 
     elif agent_name == "quiz":
         if "contenu_gift" not in data:

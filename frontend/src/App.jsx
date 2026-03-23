@@ -191,7 +191,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen pb-12">
+    <div className="min-h-screen">
       <Header />
 
       <main className="max-w-5xl mx-auto px-4 mt-4 space-y-8">
@@ -346,12 +346,40 @@ function App() {
         <HistorySection onReplay={handleReplay} refreshKey={historyRefreshKey} />
       </main>
 
-      {/* Bottom bar */}
-      <footer className="fixed bottom-0 left-0 right-0 py-3 px-4 text-center"
-        style={{ background: 'linear-gradient(to top, var(--bg-primary), transparent)' }}>
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          CourseGen AI v1.0 — Propulsé par Mistral AI & Claude
-        </p>
+      {/* Footer */}
+      <footer style={{
+        marginTop: '64px',
+        borderTop: '1px solid var(--border-subtle)',
+        background: 'rgba(15, 15, 30, 0.9)',
+        backdropFilter: 'blur(12px)',
+        padding: '24px 16px',
+      }}>
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+
+          {/* Logo + nom */}
+          <div className="flex items-center gap-3">
+            <img src="/logo-iesig.png" alt="IESIG" style={{ height: '36px', width: 'auto' }} />
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                IESIG
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Institut d'Enseignement Supérieur en Informatique et Gestion
+              </p>
+            </div>
+          </div>
+
+          {/* Copyright */}
+          <div className="text-center sm:text-right">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              © 2026 IESIG — Tous droits réservés
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>
+              Développé par <span style={{ color: 'var(--accent-primary-light)', fontWeight: '500' }}>Mohamed CHENNI</span>
+            </p>
+          </div>
+
+        </div>
       </footer>
     </div>
   )

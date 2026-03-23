@@ -80,50 +80,68 @@ def build_agent_redacteur_user(
     specialite: str, niveau: str, module: str, chapitre: str, plan_json: str
 ) -> str:
     niveau_desc = get_niveau_description(niveau)
-    return f"""Rédige le contenu du cours en JSON compact à partir du plan ci-dessous.
+    return f"""Rédige le contenu complet du cours en JSON à partir du plan ci-dessous.
 
 CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}
 
 PLAN :
 {plan_json}
 
-RÈGLES STRICTES (pour rester dans la limite de tokens) :
-- introduction : 2-3 phrases maximum
-- introduction_partie : 1-2 phrases
-- contenu de chaque sous_partie : 80 à 120 mots maximum
-- 1 seul exemple par sous_partie (chaîne simple, pas de liste)
-- definitions : 3 termes maximum, définition courte (1 phrase)
-- points_cles : 3 points, 1 phrase chacun
-- NE PAS inclure de champs supplémentaires
+CONSIGNES DE RÉDACTION :
+- introduction : paragraphe de 4-5 phrases présentant le chapitre et ses enjeux
+- introduction_partie : 2-3 phrases introduisant chaque grande partie
+- contenu de chaque sous_partie : 150 à 180 mots, développement académique rigoureux
+  avec définitions, explications, et liens avec la spécialité {specialite}
+- exemples : liste de 2 exemples concrets et contextualisés pour la spécialité
+- applications_pratiques : cas pratique détaillé de 120-150 mots
+- definitions : 5 termes clés du chapitre avec définitions précises (2-3 phrases chacune)
+- points_cles : 5 points essentiels à retenir, formulés en phrases complètes
+- questions_revision : 4 questions de révision pour auto-évaluation
+- pour_aller_plus_loin : 3 pistes d'approfondissement (livres, concepts, méthodes)
 
-Retourne UNIQUEMENT ce JSON (sans balises markdown) :
+Retourne UNIQUEMENT ce JSON (sans balises markdown autour) :
 {{
-  "introduction": "<2-3 phrases d'introduction>",
+  "introduction": "<paragraphe d'introduction 4-5 phrases>",
   "parties": [
     {{
       "partie": "I",
-      "titre": "<titre>",
-      "introduction_partie": "<1-2 phrases>",
+      "titre": "<titre copié du plan>",
+      "introduction_partie": "<2-3 phrases>",
       "sous_parties": [
         {{
           "code": "A",
-          "titre": "<titre>",
-          "contenu": "<80 à 120 mots>",
-          "exemples": "<1 exemple concret>"
+          "titre": "<titre copié du plan>",
+          "contenu": "<développement académique 150-180 mots>",
+          "exemples": ["<exemple concret 1>", "<exemple concret 2>"]
         }}
       ]
     }}
   ],
-  "applications_pratiques": "<cas pratique court, 60-80 mots>",
+  "applications_pratiques": "<cas pratique détaillé 120-150 mots>",
   "definitions": {{
-    "<terme 1>": "<définition courte>",
-    "<terme 2>": "<définition courte>",
-    "<terme 3>": "<définition courte>"
+    "<terme 1>": "<définition précise 2-3 phrases>",
+    "<terme 2>": "<définition précise 2-3 phrases>",
+    "<terme 3>": "<définition précise 2-3 phrases>",
+    "<terme 4>": "<définition précise 2-3 phrases>",
+    "<terme 5>": "<définition précise 2-3 phrases>"
   }},
   "points_cles": [
-    "1. <point essentiel>",
-    "2. <point essentiel>",
-    "3. <point essentiel>"
+    "1. <point essentiel en phrase complète>",
+    "2. <point essentiel en phrase complète>",
+    "3. <point essentiel en phrase complète>",
+    "4. <point essentiel en phrase complète>",
+    "5. <point essentiel en phrase complète>"
+  ],
+  "questions_revision": [
+    "<question de révision 1>",
+    "<question de révision 2>",
+    "<question de révision 3>",
+    "<question de révision 4>"
+  ],
+  "pour_aller_plus_loin": [
+    "<piste d'approfondissement 1>",
+    "<piste d'approfondissement 2>",
+    "<piste d'approfondissement 3>"
   ]
 }}"""
 
