@@ -38,7 +38,7 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
         let moteur = 'mistral'
         if (entry.moteur.toLowerCase().includes('claude')) moteur = 'claude'
         else if (entry.moteur.toLowerCase().includes('groq') || entry.moteur.toLowerCase().includes('llama')) moteur = 'groq'
-        else if (entry.moteur.toLowerCase().includes('oxlo') || entry.moteur.toLowerCase().includes('qwen')) moteur = 'oxlo'
+        else if (entry.moteur.toLowerCase().includes('gemini') || entry.moteur.toLowerCase().includes('google')) moteur = 'gemini'
 
         onReplay({
             specialite: entry.specialite,
@@ -124,11 +124,11 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
                                     <span style={{
                                         background: entry.moteur.includes('Groq') ? 'rgba(251, 191, 36, 0.1)' :
                                             entry.moteur.includes('Claude') ? 'rgba(248, 113, 113, 0.1)' :
-                                            entry.moteur.includes('Oxlo') || entry.moteur.includes('Qwen') ? 'rgba(52, 211, 153, 0.1)' :
+                                            entry.moteur.includes('Gemini') || entry.moteur.includes('Google') ? 'rgba(52, 211, 153, 0.1)' :
                                                 'rgba(99, 102, 241, 0.1)',
                                         color: entry.moteur.includes('Groq') ? 'var(--warning)' :
                                             entry.moteur.includes('Claude') ? 'var(--error)' :
-                                            entry.moteur.includes('Oxlo') || entry.moteur.includes('Qwen') ? 'var(--success)' :
+                                            entry.moteur.includes('Gemini') || entry.moteur.includes('Google') ? 'var(--success)' :
                                                 'var(--accent-primary-light)',
                                         padding: '2px 8px',
                                         borderRadius: '6px',

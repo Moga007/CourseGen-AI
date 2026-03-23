@@ -20,6 +20,8 @@ from enum import Enum
 from sqlalchemy.orm import Session
 
 from ai_engines import get_engine
+from agent_runner import run_pipeline_cours, run_agent_quiz
+from agents_config import PIPELINE_COURS
 from database import (
     HistoriqueEntry,
     add_history_entry,
@@ -38,6 +40,34 @@ from prompt_builder import (
 )
 from slides_builder import markdown_to_slides_prompt
 from pptx_builder import markdown_to_pptx
+
+
+# ─────────────────────────────────────────────
+# Sauvegarde automatique des cours
+# ─────────────────────────────────────────────
+
+COURS_DIR = Path(__file__).parent / "Cours-md"
+COURS_DIR.mkdir(exist_ok=True)
+
+
+def _slugify(text: str) -> str:
+    """Remplace les espaces par des tirets, conserve accents et caractères spéciaux."""
+    return text.strip().replace(" ", "-")
+
+
+def build_course_filename(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+    """Construit le nom de fichier : Spécialité-Niveau-Module-Chapitre.md"""
+    parts = [specialite, niveau, module, chapitre]
+    name = "-".join(_slugify(p) for p in parts)
+    return f"{name}.md"
+
+
+def save_course(specialite: str, niveau: str, module: str, chapitre: str, contenu: str) -> Path:
+    """Sauvegarde le contenu du cours dans cours_generes/ et retourne le chemin."""
+    filename = build_course_filename(specialite, niveau, module, chapitre)
+    filepath = COURS_DIR / filename
+    filepath.write_text(contenu, encoding="utf-8")
+    return filepath
 
 
 # ─────────────────────────────────────────────
@@ -82,7 +112,7 @@ class MoteurIA(str, Enum):
     MISTRAL = "mistral"
     CLAUDE  = "claude"
     GROQ    = "groq"
-    OXLO    = "oxlo"
+    GEMINI  = "gemini"
 
 
 class GenerateRequest(BaseModel):
@@ -131,6 +161,26 @@ class QuizResponse(BaseModel):
     moteur_utilise: str
 
 
+# ── Modèles V2 ────────────────────────────────────────────────────────────────
+
+class GenerateV2Request(BaseModel):
+    specialite:       str = Field(..., min_length=1, max_length=200)
+    niveau:           str = Field(..., min_length=1, max_length=20)
+    module:           str = Field(..., min_length=1, max_length=200)
+    chapitre:         str = Field(..., min_length=1, max_length=300)
+    # Reprise depuis un agent échoué (optionnel)
+    resume_from:      str | None = Field(default=None)
+    previous_results: dict | None = Field(default=None)
+
+
+class GenerateV2QuizRequest(BaseModel):
+    specialite:       str
+    niveau:           str
+    module:           str
+    chapitre:         str
+    contenu_markdown: str = Field(..., description="contenu_final_markdown issu du pipeline V2")
+
+
 # ─────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────
@@ -174,6 +224,8 @@ async def generate_course(request: GenerateRequest, db: Session = Depends(get_db
     if not contenu or not contenu.strip():
         raise HTTPException(status_code=500, detail="Le moteur IA n'a retourné aucun contenu.")
 
+    save_course(request.specialite, request.niveau, request.module, request.chapitre, contenu)
+
     db.add(HistoriqueEntry(
         id=generate_id(),
         date=datetime.now(),
@@ -201,6 +253,9 @@ async def generate_course_stream(request: GenerateRequest):
             async for chunk in engine.stream(system_prompt, user_message):
                 full_content.append(chunk)
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+
+            contenu_complet = "".join(full_content)
+            save_course(request.specialite, request.niveau, request.module, request.chapitre, contenu_complet)
 
             add_history_entry(HistoriqueEntry(
                 id=generate_id(),
@@ -354,6 +409,86 @@ async def get_historique(db: Session = Depends(get_db)):
         .all()
     )
     return [e.to_dict() for e in entries]
+
+
+# ─────────────────────────────────────────────
+# Routes Multi-Agents V2
+# ─────────────────────────────────────────────
+
+@app.get("/generate-v2/agents")
+async def list_v2_agents():
+    """Retourne la configuration des agents du pipeline V2 (utilisé par l'UI)."""
+    return {
+        "pipeline_cours": [
+            {
+                "name":        a.name,
+                "label":       a.label,
+                "engine":      a.engine_name,
+                "model":       a.model_id,
+                "max_tokens":  a.max_tokens,
+                "temperature": a.temperature,
+            }
+            for a in PIPELINE_COURS
+        ]
+    }
+
+
+@app.post("/generate-v2/stream")
+async def generate_v2_stream(request: GenerateV2Request):
+    """
+    Pipeline multi-agents V2 : 4 agents séquentiels avec SSE.
+    Supporte la reprise depuis un agent échoué via resume_from + previous_results.
+    """
+    async def event_stream():
+        try:
+            async for event in run_pipeline_cours(
+                specialite=request.specialite,
+                niveau=request.niveau,
+                module=request.module,
+                chapitre=request.chapitre,
+                resume_from=request.resume_from,
+                previous_results=request.previous_results,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "Connection":       "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/generate-v2/quiz/stream")
+async def generate_v2_quiz_stream(request: GenerateV2QuizRequest):
+    """Agent Quiz V2 — génère un quiz GIFT à partir du cours produit par le pipeline."""
+    async def event_stream():
+        try:
+            async for event in run_agent_quiz(
+                specialite=request.specialite,
+                niveau=request.niveau,
+                module=request.module,
+                chapitre=request.chapitre,
+                contenu_markdown=request.contenu_markdown,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "Connection":       "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ─────────────────────────────────────────────

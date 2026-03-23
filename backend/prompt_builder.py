@@ -187,7 +187,7 @@ def build_quiz_prompt(specialite: str, niveau: str, module: str, chapitre: str) 
     Construit le prompt pour générer un quiz au format GIFT à partir d'un cours.
 
     Le format GIFT est le format d'import natif de Moodle.
-    Génère un mix de QCM, Vrai/Faux et réponses courtes.
+    Génère uniquement des QCM et des questions Vrai/Faux.
     """
     niveau_desc = get_niveau_description(niveau)
 
@@ -207,17 +207,17 @@ Génère entre 10 et 20 questions au total, en adaptant le nombre à la complexi
 - Un chapitre dense, technique ou multi-notions → 17 à 20 questions
 
 Répartis les questions ainsi (proportionnellement au total choisi) :
-- ~50% de QCM avec 4 options dont une seule correcte
-- ~25% de questions Vrai/Faux
-- ~25% de questions à réponse courte (mot ou expression précise)
+- ~70% de QCM avec 4 options dont une seule correcte
+- ~30% de questions Vrai/Faux
+
+TYPES DE QUESTIONS AUTORISÉS : QCM et Vrai/Faux UNIQUEMENT. N'utilise aucun autre type (pas de réponses courtes, pas de questions à compléter, pas d'appariement).
 
 RÈGLES DU FORMAT GIFT :
 1. Chaque question commence par un titre entre :: ::
 2. QCM : la bonne réponse est préfixée par = , les mauvaises par ~
 3. Vrai/Faux : réponse entre accolades : {{TRUE}} ou {{FALSE}}
-4. Réponse courte : la bonne réponse entre accolades avec = : {{=réponse}}
-5. Sépare chaque question par une ligne vide
-6. Ajoute un commentaire de section avec // avant chaque groupe
+4. Sépare chaque question par une ligne vide
+5. Ajoute un commentaire de section avec // avant chaque groupe
 
 EXEMPLE DE FORMAT ATTENDU :
 
@@ -230,10 +230,7 @@ EXEMPLE DE FORMAT ATTENDU :
 }}
 
 // Vrai/Faux
-::Q7:: Affirmation à évaluer. {{TRUE}}
-
-// Réponse courte
-::Q10:: Quel terme désigne... ? {{=terme exact}}
+::Q8:: Affirmation à évaluer. {{TRUE}}
 
 IMPORTANT :
 - Les questions doivent couvrir l'ensemble du chapitre (pas seulement une partie)
@@ -248,6 +245,6 @@ def build_quiz_user_message(specialite: str, niveau: str, module: str, chapitre:
     return (
         f"Génère le quiz complet au format GIFT pour le chapitre \"{chapitre}\" "
         f"du module \"{module}\" en {specialite}, niveau {niveau}. "
-        f"Entre 10 et 20 questions variées (QCM, Vrai/Faux, réponses courtes) selon la complexité du chapitre, "
+        f"Entre 10 et 20 questions (QCM et Vrai/Faux uniquement) selon la complexité du chapitre, "
         f"couvrant l'ensemble du chapitre, format GIFT strict prêt à importer dans Moodle."
     )

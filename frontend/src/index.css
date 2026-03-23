@@ -126,6 +126,11 @@ body::before {
   }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 @keyframes spin-slow {
   from {
     transform: rotate(0deg);

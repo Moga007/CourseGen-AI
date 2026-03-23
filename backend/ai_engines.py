@@ -52,6 +52,21 @@ class BaseEngine(ABC):
     async def stream(self, system_prompt: str, user_message: str) -> AsyncIterator[str]:
         """Génère le contenu token par token (async generator)."""
 
+    async def generate_with_model(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_id: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.5,
+    ) -> str:
+        """Variante de generate() avec modèle et paramètres configurables.
+        Utilisée par le pipeline multi-agents V2.
+        Implémentation par défaut : délègue à generate() (ignore les overrides).
+        Les sous-classes Mistral et Claude surchargent cette méthode.
+        """
+        return await self.generate(system_prompt, user_message)
+
 
 # ─────────────────────────────────────────────
 # Implémentations
@@ -89,6 +104,34 @@ class MistralEngine(BaseEngine):
             messages.append({"role": "user", "content": _CONTINUATION_MSG})
         return full_content
 
+    async def generate_with_model(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_id: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.5,
+    ) -> str:
+        """Version configurables pour le pipeline V2. Appel synchrone wrappé dans to_thread."""
+        import asyncio
+        client = self._get_client()
+        model = model_id or "mistral-large-latest"
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+
+        def _sync_call():
+            response = client.chat.complete(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content or ""
+
+        return await asyncio.to_thread(_sync_call)
+
     async def stream(self, system_prompt: str, user_message: str):
         client = self._get_client()
         messages = [
@@ -98,11 +141,11 @@ class MistralEngine(BaseEngine):
         for _ in range(_MAX_CONTINUATIONS + 1):
             buffered = ""
             hit_limit = False
-            async with client.chat.stream_async(
+            async with (await client.chat.stream_async(
                 model="mistral-large-latest",
                 messages=messages,
                 max_tokens=8192,
-            ) as stream:
+            )) as stream:
                 async for event in stream:
                     delta = event.data.choices[0].delta.content or ""
                     if delta:
@@ -126,6 +169,26 @@ class ClaudeEngine(BaseEngine):
         if not api_key or api_key == "votre_cle_anthropic_ici":
             raise ValueError("ANTHROPIC_API_KEY non configurée. Ajoutez votre clé dans le fichier .env")
         return AsyncAnthropic(api_key=api_key) if async_mode else Anthropic(api_key=api_key)
+
+    async def generate_with_model(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_id: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.5,
+    ) -> str:
+        """Version async native pour le pipeline V2. Utilise AsyncAnthropic."""
+        client = self._get_client(async_mode=True)
+        model = model_id or "claude-3-5-sonnet-20241022"
+        response = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return "".join(block.text for block in response.content if block.type == "text")
 
     async def generate(self, system_prompt: str, user_message: str) -> str:
         client = self._get_client()
@@ -229,46 +292,70 @@ class GroqEngine(BaseEngine):
             messages.append({"role": "user", "content": _CONTINUATION_MSG})
 
 
-class OxloEngine(BaseEngine):
-    name = "oxlo"
-    label = "Qwen 3 32B (Oxlo)"
-    uses_light_prompt = True  # infra Oxlo plus lente → prompt allégé pour éviter les timeouts
+class GeminiEngine(BaseEngine):
+    name = "gemini"
+    label = "Gemini 3 Flash (Google)"
 
-    def _get_client(self, async_mode: bool = False):
-        from openai import OpenAI, AsyncOpenAI
-        api_key = os.getenv("OXLO_API_KEY")
-        if not api_key or api_key == "votre_cle_oxlo_ici":
-            raise ValueError("OXLO_API_KEY non configurée. Ajoutez votre clé dans le fichier .env")
-        base_url = "https://api.oxlo.ai/v1"
-        return AsyncOpenAI(api_key=api_key, base_url=base_url) if async_mode else OpenAI(api_key=api_key, base_url=base_url)
+    _MODEL = "gemini-3-flash-preview"
+
+    def _get_client(self):
+        from google import genai
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key or api_key == "votre_cle_google_ici":
+            raise ValueError("GOOGLE_API_KEY non configurée. Ajoutez votre clé dans le fichier .env")
+        return genai.Client(api_key=api_key)
 
     async def generate(self, system_prompt: str, user_message: str) -> str:
+        from google.genai import types
         client = self._get_client()
-        response = client.chat.completions.create(
-            model="qwen-3-32b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            max_tokens=4096,
+        contents = [{"role": "user", "parts": [{"text": user_message}]}]
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=8192,
         )
-        return response.choices[0].message.content
+        full_content = ""
+        for _ in range(_MAX_CONTINUATIONS + 1):
+            response = await client.aio.models.generate_content(
+                model=self._MODEL,
+                contents=contents,
+                config=config,
+            )
+            chunk = response.text or ""
+            full_content += chunk
+            finish_reason = response.candidates[0].finish_reason if response.candidates else None
+            if not finish_reason or finish_reason.name != "MAX_TOKENS":
+                break
+            contents.append({"role": "model", "parts": [{"text": chunk}]})
+            contents.append({"role": "user", "parts": [{"text": _CONTINUATION_MSG}]})
+        return full_content
 
     async def stream(self, system_prompt: str, user_message: str):
-        client = self._get_client(async_mode=True)
-        stream = await client.chat.completions.create(
-            model="qwen-3-32b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            max_tokens=4096,
-            stream=True,
+        from google.genai import types
+        client = self._get_client()
+        contents = [{"role": "user", "parts": [{"text": user_message}]}]
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=8192,
         )
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                yield delta
+        for _ in range(_MAX_CONTINUATIONS + 1):
+            buffered = ""
+            hit_limit = False
+            async for chunk in await client.aio.models.generate_content_stream(
+                model=self._MODEL,
+                contents=contents,
+                config=config,
+            ):
+                if chunk.text:
+                    buffered += chunk.text
+                    yield chunk.text
+                if chunk.candidates:
+                    fr = chunk.candidates[0].finish_reason
+                    if fr and fr.name == "MAX_TOKENS":
+                        hit_limit = True
+            if not hit_limit:
+                break
+            contents.append({"role": "model", "parts": [{"text": buffered}]})
+            contents.append({"role": "user", "parts": [{"text": _CONTINUATION_MSG}]})
 
 
 # ─────────────────────────────────────────────
@@ -303,4 +390,4 @@ def list_engines() -> list[BaseEngine]:
 register(MistralEngine())
 register(ClaudeEngine())
 register(GroqEngine())
-register(OxloEngine())
+register(GeminiEngine())

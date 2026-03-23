@@ -155,7 +155,7 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                             <option value="mistral">Mistral</option>
                             <option value="claude">Claude</option>
                             <option value="groq">Groq</option>
-                            <option value="oxlo">Oxlo</option>
+                            <option value="gemini">Gemini</option>
                         </select>
                         <button
                             onClick={handleGenerateQuiz}
