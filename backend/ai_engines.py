@@ -52,6 +52,21 @@ class BaseEngine(ABC):
     async def stream(self, system_prompt: str, user_message: str) -> AsyncIterator[str]:
         """Génère le contenu token par token (async generator)."""
 
+    async def generate_with_model(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_id: str | None = None,
+        max_tokens: int = 8192,
+        temperature: float = 0.5,
+    ) -> str:
+        """Variante de generate() avec modèle et paramètres configurables.
+        Utilisé par le pipeline multi-agents V2.
+        Implémentation par défaut : délègue à generate() sans tenir compte des params.
+        Les sous-classes concernées surchargent cette méthode.
+        """
+        return await self.generate(system_prompt, user_message)
+
 
 # ─────────────────────────────────────────────
 # Implémentations
@@ -88,6 +103,27 @@ class MistralEngine(BaseEngine):
             messages.append({"role": "assistant", "content": chunk})
             messages.append({"role": "user", "content": _CONTINUATION_MSG})
         return full_content
+
+    async def generate_with_model(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_id: str | None = None,
+        max_tokens: int = 8192,
+        temperature: float = 0.5,
+    ) -> str:
+        client = self._get_client()
+        model = model_id or "mistral-large-latest"
+        response = client.chat.complete(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return response.choices[0].message.content or ""
 
     async def stream(self, system_prompt: str, user_message: str):
         client = self._get_client()
@@ -145,6 +181,26 @@ class ClaudeEngine(BaseEngine):
             messages.append({"role": "assistant", "content": chunk})
             messages.append({"role": "user", "content": _CONTINUATION_MSG})
         return full_content
+
+    async def generate_with_model(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_id: str | None = None,
+        max_tokens: int = 8192,
+        temperature: float = 0.5,
+    ) -> str:
+        # Utilise AsyncAnthropic pour ne pas bloquer l'event loop FastAPI
+        client = self._get_client(async_mode=True)
+        model = model_id or "claude-3-5-sonnet-20241022"
+        response = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return "".join(block.text for block in response.content if block.type == "text")
 
     async def stream(self, system_prompt: str, user_message: str):
         client = self._get_client(async_mode=True)

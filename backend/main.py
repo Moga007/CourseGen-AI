@@ -38,6 +38,8 @@ from prompt_builder import (
 )
 from slides_builder import markdown_to_slides_prompt
 from pptx_builder import markdown_to_pptx
+from agent_runner import run_pipeline_cours, run_agent_quiz
+from agents_config import PIPELINE_COURS
 
 
 # ─────────────────────────────────────────────
@@ -129,6 +131,23 @@ class QuizRequest(BaseModel):
 class QuizResponse(BaseModel):
     contenu_gift:   str = Field(..., description="Quiz au format GIFT")
     moteur_utilise: str
+
+
+class GenerateV2Request(BaseModel):
+    specialite:       str = Field(..., min_length=1, max_length=200)
+    niveau:           str = Field(..., min_length=1, max_length=20)
+    module:           str = Field(..., min_length=1, max_length=200)
+    chapitre:         str = Field(..., min_length=1, max_length=300)
+    resume_from:      str | None = Field(default=None, description="Nom de l'agent depuis lequel reprendre")
+    previous_results: dict | None = Field(default=None, description="Contexte des agents précédents")
+
+
+class GenerateV2QuizRequest(BaseModel):
+    specialite:       str
+    niveau:           str
+    module:           str
+    chapitre:         str
+    contenu_markdown: str = Field(..., description="Sortie de l'Agent Qualité")
 
 
 # ─────────────────────────────────────────────
@@ -354,6 +373,84 @@ async def get_historique(db: Session = Depends(get_db)):
         .all()
     )
     return [e.to_dict() for e in entries]
+
+
+# ─────────────────────────────────────────────
+# Pipeline Multi-Agents V2
+# ─────────────────────────────────────────────
+
+@app.get("/generate-v2/agents")
+async def list_v2_agents():
+    """Retourne la configuration des agents du pipeline V2 (pour l'UI)."""
+    return {
+        "pipeline_cours": [
+            {
+                "name": a.name,
+                "label": a.label,
+                "engine": a.engine_name,
+                "model": a.model_id,
+            }
+            for a in PIPELINE_COURS
+        ]
+    }
+
+
+@app.post("/generate-v2/stream")
+async def generate_v2_stream(request: GenerateV2Request):
+    """
+    Pipeline multi-agents V2 : 4 agents séquentiels avec SSE.
+    Supporte la reprise depuis un agent échoué via resume_from + previous_results.
+    """
+    async def event_stream():
+        try:
+            async for event in run_pipeline_cours(
+                specialite=request.specialite,
+                niveau=request.niveau,
+                module=request.module,
+                chapitre=request.chapitre,
+                resume_from=request.resume_from,
+                previous_results=request.previous_results,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/generate-v2/quiz/stream")
+async def generate_v2_quiz_stream(request: GenerateV2QuizRequest):
+    """Agent Quiz V2 — génère un quiz GIFT à partir du cours du pipeline."""
+    async def event_stream():
+        try:
+            async for event in run_agent_quiz(
+                specialite=request.specialite,
+                niveau=request.niveau,
+                module=request.module,
+                chapitre=request.chapitre,
+                contenu_markdown=request.contenu_markdown,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ─────────────────────────────────────────────

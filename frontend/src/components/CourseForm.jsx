@@ -22,7 +22,7 @@ const NIVEAUX_LABELS = {
 // Groupes pour l'affichage (optgroup)
 const NIVEAUX_GROUPE = { B1: 'Bachelor', B2: 'Bachelor', B3: 'Bachelor', M1: 'Master', M2: 'Master' }
 
-export default function CourseForm({ onSubmit, isLoading, initialData }) {
+export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode, onToggleMode }) {
     const [formData, setFormData] = useState({
         specialite: '',
         niveau: '',
@@ -68,20 +68,62 @@ export default function CourseForm({ onSubmit, isLoading, initialData }) {
     return (
         <form onSubmit={handleSubmit} className="glass-card p-6 sm:p-8 animate-fade-in-up-delay">
             {/* Header */}
-            <div className="mb-6">
-                <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-primary-light)' }}>
-                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                        <polyline points="14,2 14,8 20,8" />
-                        <line x1="16" y1="13" x2="8" y2="13" />
-                        <line x1="16" y1="17" x2="8" y2="17" />
-                        <line x1="10" y1="9" x2="8" y2="9" />
-                    </svg>
-                    Paramètres du cours
-                </h2>
-                <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                    Renseignez les informations pour générer votre cours
-                </p>
+            <div className="flex items-start justify-between mb-6">
+                <div>
+                    <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-primary-light)' }}>
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14,2 14,8 20,8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                            <line x1="10" y1="9" x2="8" y2="9" />
+                        </svg>
+                        Paramètres du cours
+                    </h2>
+                    <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                        Renseignez les informations pour générer votre cours
+                    </p>
+                </div>
+
+                {/* Toggle Classic / Multi-Agents */}
+                {onToggleMode && (
+                    <div style={{
+                        display: 'inline-flex',
+                        background: 'var(--bg-primary)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '10px',
+                        padding: '3px',
+                        gap: '2px',
+                        flexShrink: 0,
+                    }}>
+                        {[
+                            { id: false, label: 'Classic' },
+                            { id: true,  label: '⚡ Multi-Agents' },
+                        ].map(mode => (
+                            <button
+                                key={String(mode.id)}
+                                type="button"
+                                onClick={() => onToggleMode(mode.id)}
+                                style={{
+                                    padding: '5px 14px',
+                                    borderRadius: '7px',
+                                    border: 'none',
+                                    fontSize: '12px',
+                                    fontWeight: isV2Mode === mode.id ? '600' : '400',
+                                    background: isV2Mode === mode.id
+                                        ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-primary-light))'
+                                        : 'transparent',
+                                    color: isV2Mode === mode.id ? '#fff' : 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                {mode.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Grid layout */}
@@ -159,8 +201,8 @@ export default function CourseForm({ onSubmit, isLoading, initialData }) {
                 </div>
             </div>
 
-            {/* Moteur IA */}
-            <div className="mb-6">
+            {/* Moteur IA — masqué en mode Multi-Agents (les modèles sont fixés par agent) */}
+            <div className="mb-6" style={{ display: isV2Mode ? 'none' : 'block' }}>
                 <label className="form-label">Moteur IA</label>
                 <div className="engine-toggle">
                     <button
