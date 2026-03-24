@@ -33,6 +33,8 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
         })
     }
 
+    const isV2Entry = (entry) => entry.moteur === 'Pipeline Multi-Agents V2'
+
     const handleReplay = (entry) => {
         // Map le nom du moteur affiché vers la valeur du formulaire
         let moteur = 'mistral'
@@ -46,6 +48,8 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
             module: entry.module,
             chapitre: entry.chapitre,
             moteur,
+            // Indique à App.jsx de basculer en mode V2 si l'entrée vient du pipeline
+            isV2: isV2Entry(entry),
         })
 
         // Scroll vers le haut pour voir le formulaire rempli
@@ -122,11 +126,13 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
                                 </td>
                                 <td style={{ padding: '12px', whiteSpace: 'nowrap' }}>
                                     <span style={{
-                                        background: entry.moteur.includes('Groq') ? 'rgba(251, 191, 36, 0.1)' :
+                                        background: isV2Entry(entry) ? 'rgba(139, 92, 246, 0.15)' :
+                                            entry.moteur.includes('Groq') ? 'rgba(251, 191, 36, 0.1)' :
                                             entry.moteur.includes('Claude') ? 'rgba(248, 113, 113, 0.1)' :
                                             entry.moteur.includes('Gemini') || entry.moteur.includes('Google') ? 'rgba(52, 211, 153, 0.1)' :
                                                 'rgba(99, 102, 241, 0.1)',
-                                        color: entry.moteur.includes('Groq') ? 'var(--warning)' :
+                                        color: isV2Entry(entry) ? '#a78bfa' :
+                                            entry.moteur.includes('Groq') ? 'var(--warning)' :
                                             entry.moteur.includes('Claude') ? 'var(--error)' :
                                             entry.moteur.includes('Gemini') || entry.moteur.includes('Google') ? 'var(--success)' :
                                                 'var(--accent-primary-light)',

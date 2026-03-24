@@ -91,7 +91,14 @@ function App() {
   }
 
   const handleReplay = (formData) => {
+    // Si l'entrée d'historique vient du pipeline V2, on bascule automatiquement en mode V2
+    if (formData.isV2) {
+      setIsV2Mode(true)
+      setCourseData(null)
+      setPipelineV2Data(null)
+    }
     setReplayData(formData)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleGenerateV2 = async (formData) => {

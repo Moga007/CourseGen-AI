@@ -449,6 +449,25 @@ async def generate_v2_stream(request: GenerateV2Request):
                 resume_from=request.resume_from,
                 previous_results=request.previous_results,
             ):
+                # Sauvegarde historique + fichier MD quand le pipeline se termine
+                if event.get("event") == "pipeline_complete":
+                    contenu_md = event.get("contenu_final_markdown", "")
+                    if contenu_md:
+                        save_course(
+                            request.specialite, request.niveau,
+                            request.module, request.chapitre, contenu_md,
+                        )
+                    add_history_entry(HistoriqueEntry(
+                        id=generate_id(),
+                        date=datetime.now(),
+                        specialite=request.specialite,
+                        niveau=request.niveau,
+                        module=request.module,
+                        chapitre=request.chapitre,
+                        moteur="Pipeline Multi-Agents V2",
+                        duree_secondes=event.get("duration_total", 0.0),
+                    ))
+
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)}, ensure_ascii=False)}\n\n"
