@@ -162,6 +162,7 @@ class MistralEngine(BaseEngine):
 class ClaudeEngine(BaseEngine):
     name = "claude"
     label = "Claude Sonnet (Anthropic)"
+    DEFAULT_MODEL = "claude-sonnet-4-5"   # modèle par défaut — modifier ici si besoin
 
     def _get_client(self, async_mode: bool = False):
         from anthropic import Anthropic, AsyncAnthropic
@@ -180,7 +181,7 @@ class ClaudeEngine(BaseEngine):
     ) -> str:
         """Version async native pour le pipeline V2. Utilise AsyncAnthropic."""
         client = self._get_client(async_mode=True)
-        model = model_id or "claude-3-5-sonnet-20241022"
+        model = model_id or self.DEFAULT_MODEL
         response = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -196,7 +197,7 @@ class ClaudeEngine(BaseEngine):
         full_content = ""
         for _ in range(_MAX_CONTINUATIONS + 1):
             response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.DEFAULT_MODEL,
                 max_tokens=8192,
                 system=system_prompt,
                 messages=messages,
@@ -216,7 +217,7 @@ class ClaudeEngine(BaseEngine):
             buffered = ""
             stop_reason = None
             async with client.messages.stream(
-                model="claude-3-5-sonnet-20241022",
+                model=self.DEFAULT_MODEL,
                 max_tokens=8192,
                 system=system_prompt,
                 messages=messages,
