@@ -42,13 +42,27 @@ export default function AgentResultView({ pipelineResult, formParams }) {
         setPptxLoading(true)
         setPptxError(null)
         try {
-            const response = await axios.post(`${API_URL}/generate-pptx`, {
-                contenu: pipelineResult.contenu_final_markdown,
-                specialite: formParams?.specialite || '',
-                module: formParams?.module || '',
-                chapitre: formParams?.chapitre || '',
-                niveau: formParams?.niveau || '',
-            }, { timeout: 60000, responseType: 'blob' })
+            // V2 : utilise le slides_json structuré de l'Agent Designer
+            const hasSlides = pipelineResult.slides_json?.slides?.length > 0
+            const endpoint  = hasSlides ? '/generate-v2/pptx' : '/generate-pptx'
+            const payload   = hasSlides
+                ? {
+                    slides_json: pipelineResult.slides_json,
+                    specialite:  formParams?.specialite || '',
+                    module:      formParams?.module || '',
+                    chapitre:    formParams?.chapitre || '',
+                    niveau:      formParams?.niveau || '',
+                  }
+                : {
+                    contenu:    pipelineResult.contenu_final_markdown,
+                    specialite: formParams?.specialite || '',
+                    module:     formParams?.module || '',
+                    chapitre:   formParams?.chapitre || '',
+                    niveau:     formParams?.niveau || '',
+                  }
+
+            const response = await axios.post(`${API_URL}${endpoint}`, payload,
+                { timeout: 60000, responseType: 'blob' })
 
             const url = URL.createObjectURL(new Blob([response.data]))
             const a = document.createElement('a')

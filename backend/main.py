@@ -39,7 +39,7 @@ from prompt_builder import (
     build_user_message_light,
 )
 from slides_builder import markdown_to_slides_prompt
-from pptx_builder import markdown_to_pptx
+from pptx_builder import markdown_to_pptx, slides_json_to_pptx
 
 
 # ─────────────────────────────────────────────
@@ -162,6 +162,14 @@ class QuizResponse(BaseModel):
 
 
 # ── Modèles V2 ────────────────────────────────────────────────────────────────
+
+class PptxV2Request(BaseModel):
+    slides_json: dict = Field(..., description="slides_json produit par l'Agent Designer/Qualité")
+    specialite:  str
+    niveau:      str
+    module:      str
+    chapitre:    str
+
 
 class GenerateV2Request(BaseModel):
     specialite:       str = Field(..., min_length=1, max_length=200)
@@ -414,6 +422,34 @@ async def get_historique(db: Session = Depends(get_db)):
 # ─────────────────────────────────────────────
 # Routes Multi-Agents V2
 # ─────────────────────────────────────────────
+
+@app.post("/generate-v2/pptx")
+async def generate_v2_pptx(request: PptxV2Request):
+    """Génère un PPTX depuis le slides_json de l'Agent Designer (pipeline V2)."""
+    image_bytes, photographer = await _fetch_unsplash_image(
+        f"{request.specialite} {request.chapitre}"
+    )
+    try:
+        pptx_bytes = slides_json_to_pptx(
+            slides_json=request.slides_json,
+            specialite=request.specialite,
+            module=request.module,
+            chapitre=request.chapitre,
+            niveau=request.niveau,
+            title_image=image_bytes,
+            photographer=photographer or "",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint V2 : {e}")
+
+    safe_name = unicodedata.normalize("NFKD", request.chapitre).encode("ascii", "ignore").decode()
+    filename  = safe_name[:60].replace(" ", "_").replace("/", "-") + ".pptx"
+    return StreamingResponse(
+        iter([pptx_bytes]),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 @app.get("/generate-v2/agents")
 async def list_v2_agents():

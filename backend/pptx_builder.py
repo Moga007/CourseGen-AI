@@ -622,6 +622,220 @@ def _make_key_points_slide(prs, points: list[str]):
 
 
 # ═══════════════════════════════════════════════════════
+#  SLIDES V2 — layouts du pipeline multi-agents
+# ═══════════════════════════════════════════════════════
+
+def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''):
+    """Slide stat-callout : statistiques en grands nombres sur fond de cartes."""
+    slide = _content_base(prs, title, section_label)
+
+    top_title = 0.5 if section_label else 0.18
+    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+    body_top = sep_top + 0.5
+
+    n = min(len(stats), 4)
+    if n == 0:
+        return slide
+    card_w = 12.9 / n
+
+    for i, stat in enumerate(stats[:4]):
+        lx = 0.22 + i * card_w
+        _rounded_rect(slide, lx + 0.12, body_top, card_w - 0.25, 3.8, C_ACCENT_DARK)
+
+        # Valeur
+        tb_val = _tb(slide, lx + 0.12, body_top + 0.5, card_w - 0.25, 1.8)
+        tf_v = tb_val.text_frame
+        pv = tf_v.paragraphs[0]
+        pv.alignment = PP_ALIGN.CENTER
+        run_v = pv.add_run()
+        run_v.text = str(stat.get('valeur', ''))
+        _run_fmt(run_v, 44, C_ACCENT2, bold=True)
+
+        # Label
+        tb_lbl = _tb(slide, lx + 0.12, body_top + 2.5, card_w - 0.25, 1.1)
+        tf_l = tb_lbl.text_frame
+        tf_l.word_wrap = True
+        pl = tf_l.paragraphs[0]
+        pl.alignment = PP_ALIGN.CENTER
+        _add_runs(pl, _truncate(str(stat.get('label', '')), 80), 12, C_TEXT_MUTED)
+
+    return slide
+
+
+def _make_two_column_text_slide(prs, title: str, left_text: str, right_text: str,
+                                 section_label: str = ''):
+    """Slide two-column avec texte libre gauche/droite (pas une liste de puces)."""
+    slide = _content_base(prs, title, section_label)
+
+    top_title = 0.5 if section_label else 0.18
+    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+    body_top = sep_top + 0.18
+    body_h   = 7.5 - body_top - 0.15
+
+    _rect(slide, 6.8, body_top, 0.02, body_h, C_ACCENT_MID)
+
+    for text, lx in [(left_text, 0.22), (right_text, 6.95)]:
+        tb = _tb(slide, lx, body_top, 6.35, body_h)
+        tf = tb.text_frame
+        tf.word_wrap = True
+        lines = [l for l in text.split('\n') if l.strip()]
+        for i, line in enumerate(lines[:14]):
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            p.space_before = Pt(4)
+            _add_runs(p, line.strip(), 12, C_TEXT_LIGHT)
+
+    return slide
+
+
+def _make_schema_slide(prs, title: str, description: str, elements: list[str],
+                        section_label: str = ''):
+    """Slide schema : description + éléments reliés par des flèches."""
+    slide = _content_base(prs, title, section_label)
+
+    top_title = 0.5 if section_label else 0.18
+    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+    body_top = sep_top + 0.3
+
+    if description:
+        tb_desc = _tb(slide, 0.22, body_top, 12.9, 0.75)
+        tf_d = tb_desc.text_frame
+        tf_d.word_wrap = True
+        pd = tf_d.paragraphs[0]
+        _add_runs(pd, _truncate(description, 200), 12, C_TEXT_MUTED)
+        body_top += 0.9
+
+    n = min(len(elements), 7)
+    if n == 0:
+        return slide
+
+    elem_w   = min(2.0, 12.0 / n)
+    arrow_w  = 0.35
+    total_w  = n * elem_w + (n - 1) * arrow_w
+    start_x  = 0.22 + max(0.0, (12.9 - total_w) / 2)
+    elem_top = body_top + 0.5
+
+    for i, el in enumerate(elements[:7]):
+        lx = start_x + i * (elem_w + arrow_w)
+        _rounded_rect(slide, lx, elem_top, elem_w, 1.0, C_ACCENT_MID)
+        tb = _tb(slide, lx, elem_top, elem_w, 1.0)
+        tf = tb.text_frame
+        tf.word_wrap = True
+        pe = tf.paragraphs[0]
+        pe.alignment = PP_ALIGN.CENTER
+        _add_runs(pe, _truncate(el, 35), 11, C_TEXT_LIGHT)
+
+        if i < n - 1:
+            tb_arr = _tb(slide, lx + elem_w + 0.02, elem_top + 0.28, arrow_w - 0.04, 0.45)
+            tf_a = tb_arr.text_frame
+            pa = tf_a.paragraphs[0]
+            pa.alignment = PP_ALIGN.CENTER
+            run_a = pa.add_run()
+            run_a.text = '→'
+            _run_fmt(run_a, 18, C_ACCENT2, bold=True)
+
+    return slide
+
+
+# ── Point d'entrée V2 ──────────────────────────────────────────────────────
+
+def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
+                         chapitre: str, niveau: str = '',
+                         title_image: bytes = None, photographer: str = '') -> bytes:
+    """
+    Génère une présentation PPTX depuis le slides_json de l'Agent Designer.
+    Chaque slide est rendue selon son layout : bullets, two-column, stat-callout, schema.
+    Utilise les mêmes styles visuels que markdown_to_pptx.
+    """
+    prs = Presentation()
+    prs.slide_width  = SLIDE_W
+    prs.slide_height = SLIDE_H
+
+    slides = slides_json.get('slides', [])
+    title_done = False
+
+    for slide_data in slides:
+        slide_type = slide_data.get('type', 'content')
+        layout     = slide_data.get('layout', 'bullets')
+        titre      = _clean(slide_data.get('titre', ''))
+        contenu    = slide_data.get('contenu') or {}
+
+        # ── Slide titre ──────────────────────────────────────────────────────
+        if slide_type == 'title' or not title_done:
+            _make_title_slide(prs, specialite, module, chapitre, niveau,
+                              title_image=title_image, photographer=photographer)
+            title_done = True
+            if slide_type == 'title':
+                continue
+
+        # ── Slide section ────────────────────────────────────────────────────
+        if slide_type == 'section':
+            _make_section_slide(prs, titre)
+            continue
+
+        # ── Slides de contenu selon layout ──────────────────────────────────
+        if layout == 'bullets':
+            items = contenu.get('items', [])
+            if not items:
+                continue
+            if len(items) > MAX_BULLETS_SINGLE:
+                _make_two_column_slide(prs, titre, [str(it) for it in items])
+            else:
+                _make_content_slide(prs, titre, [str(it) for it in items], is_bullets=True)
+
+        elif layout == 'two-column':
+            left  = str(contenu.get('colonne_gauche', '') or '')
+            right = str(contenu.get('colonne_droite', '') or '')
+            # Si les colonnes contiennent des listes → utilise le layout bullets existant
+            left_b  = _extract_bullets(left, 20)
+            right_b = _extract_bullets(right, 20)
+            if left_b and right_b:
+                _make_two_column_slide(prs, titre, left_b + right_b)
+            else:
+                _make_two_column_text_slide(prs, titre, left or '—', right or '—')
+
+        elif layout == 'stat-callout':
+            stats = contenu.get('stats', [])
+            if stats:
+                _make_stat_slide(prs, titre, stats)
+
+        elif layout == 'schema':
+            description = str(contenu.get('description_schema', '') or '')
+            elements    = [str(e) for e in (contenu.get('elements') or [])]
+            _make_schema_slide(prs, titre, description, elements)
+
+        else:
+            # Fallback : bullets avec les valeurs du contenu
+            fallback = [str(v) for v in contenu.values() if v][:8]
+            if fallback:
+                _make_content_slide(prs, titre, fallback, is_bullets=True)
+
+    buf = BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
+# ═══════════════════════════════════════════════════════
 #  POINT D'ENTRÉE
 # ═══════════════════════════════════════════════════════
 
