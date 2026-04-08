@@ -364,18 +364,31 @@ async def run_agent(
             return result
 
         except asyncio.TimeoutError:
-            result.error = f"Timeout après {config.timeout_seconds}s"
+            result.error = f"Timeout dépassé ({config.timeout_seconds}s) — l'API n'a pas répondu à temps."
         except json.JSONDecodeError as e:
             result.error = f"JSON invalide retourné par le modèle : {e}"
         except ValueError as e:
             result.error = str(e)
         except Exception as e:
-            result.error = f"Erreur inattendue : {type(e).__name__}: {e}"
+            err_str = str(e)
+            # Erreurs HTTP transitoires — message lisible sans le HTML Cloudflare
+            if "520" in err_str:
+                result.error = "L'API renvoie une erreur 520 (serveur temporairement indisponible). Réessai en cours…"
+            elif "502" in err_str:
+                result.error = "L'API renvoie une erreur 502 (mauvaise passerelle). Réessai en cours…"
+            elif "503" in err_str:
+                result.error = "L'API renvoie une erreur 503 (service indisponible). Réessai en cours…"
+            elif "429" in err_str or "rate limit" in err_str.lower():
+                result.error = "Limite de requêtes atteinte (429). Réessai dans quelques secondes…"
+            else:
+                # Autres erreurs : tronquer pour éviter les pages HTML dans le message
+                result.error = f"{type(e).__name__}: {err_str[:200]}"
 
         result.duration_seconds = round(time.time() - start, 1)
-        # Pause courte entre les tentatives
+        # Délai entre tentatives — plus long pour les erreurs réseau transitoires (5xx)
         if attempt <= config.retry_max:
-            await asyncio.sleep(2)
+            is_transient = any(code in (result.error or "") for code in ["520", "502", "503", "429"])
+            await asyncio.sleep(6 if is_transient else 2)
 
     result.status = "error"
     return result

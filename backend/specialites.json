@@ -1,0 +1,32 @@
+[
+  {
+    "value": "GFC",
+    "label": "GFC — Gestion, Finance et Comptabilité",
+    "niveaux": ["B1", "B2", "B3", "M1", "M2"]
+  },
+  {
+    "value": "RH",
+    "label": "RH — Ressources Humaines et Management",
+    "niveaux": ["B1", "B2", "B3", "M1", "M2"]
+  },
+  {
+    "value": "IWA",
+    "label": "IWA — Informatique Web et Applicatif",
+    "niveaux": ["B1", "B2", "B3"]
+  },
+  {
+    "value": "DIA",
+    "label": "DIA — Data Science et Intelligence Artificielle",
+    "niveaux": ["B1", "B2", "B3", "M1", "M2"]
+  },
+  {
+    "value": "MCD",
+    "label": "MCD — Marketing et Communication Digitale",
+    "niveaux": ["B1", "B2", "B3"]
+  },
+  {
+    "value": "GPE",
+    "label": "GPE — Gestion, Projet et Entrepreneuriat",
+    "niveaux": ["M1", "M2"]
+  }
+]

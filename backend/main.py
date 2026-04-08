@@ -46,7 +46,8 @@ from pptx_builder import markdown_to_pptx, slides_json_to_pptx
 # Sauvegarde automatique des cours
 # ─────────────────────────────────────────────
 
-COURS_DIR = Path(__file__).parent / "Cours-md"
+COURS_DIR       = Path(__file__).parent / "Cours-md"
+SPECIALITES_FILE = Path(__file__).parent / "specialites.json"
 COURS_DIR.mkdir(exist_ok=True)
 
 
@@ -214,6 +215,18 @@ def _build_prompts(request: GenerateRequest) -> tuple[str, str]:
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "CourseGen AI", "version": "1.1.0"}
+
+
+@app.get("/specialites")
+async def get_specialites():
+    """Retourne la liste des spécialités et leurs niveaux depuis specialites.json."""
+    try:
+        data = json.loads(SPECIALITES_FILE.read_text(encoding="utf-8"))
+        return data
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Fichier specialites.json introuvable.")
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"specialites.json invalide : {e}")
 
 
 @app.post("/generate", response_model=GenerateResponse)

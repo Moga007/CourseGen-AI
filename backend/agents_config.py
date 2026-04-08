@@ -42,7 +42,7 @@ AGENT_REDACTEUR = AgentConfig(
     max_tokens      = 8192,
     temperature     = 0.5,
     timeout_seconds = 150,
-    retry_max       = 2,
+    retry_max       = 3,  # +1 retry : Mistral/Cloudflare peut renvoyer des 520 transitoires
 )
 
 AGENT_DESIGNER = AgentConfig(

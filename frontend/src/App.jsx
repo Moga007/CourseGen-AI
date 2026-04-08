@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Header from './components/Header'
 import CourseForm from './components/CourseForm'
 import CourseDisplay from './components/CourseDisplay'
@@ -28,6 +28,18 @@ function App() {
   const [pipelineV2Data, setPipelineV2Data] = useState(null)
   const [v2ResumeToken, setV2ResumeToken] = useState(null)
 
+  // ── Annulation ────────────────────────────────────────────────────────────
+  const abortControllerRef = useRef(null)
+
+  const handleCancel = () => {
+    abortControllerRef.current?.abort()
+    setPipelineAgents(prev => prev.map(a =>
+      a.status === 'running' ? { ...a, status: 'cancelled' } : a
+    ))
+    setStreamingContent('')
+    setIsLoading(false)
+  }
+
   const handleGenerate = async (formData) => {
     setIsLoading(true)
     setError(null)
@@ -35,11 +47,14 @@ function App() {
     setStreamingContent('')
     setLastFormData(formData)
 
+    abortControllerRef.current = new AbortController()
+
     try {
       const response = await fetch(`${API_URL}/generate/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
+        signal: abortControllerRef.current.signal,
       })
 
       if (!response.ok) {
@@ -80,7 +95,8 @@ function App() {
         }
       }
     } catch (err) {
-      if (err.name === 'TypeError') {
+      if (err.name === 'AbortError') { /* annulation volontaire — pas d'erreur */ }
+      else if (err.name === 'TypeError') {
         setError('Impossible de contacter le serveur. Vérifiez que le backend est lancé (python main.py).')
       } else {
         setError(err.message || 'Une erreur inattendue est survenue. Veuillez réessayer.')
@@ -119,11 +135,14 @@ function App() {
       ? { ...formData, resume_from: v2ResumeToken.resume_from, previous_results: v2ResumeToken.context_snapshot }
       : formData
 
+    abortControllerRef.current = new AbortController()
+
     try {
       const response = await fetch(`${API_URL}/generate-v2/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: abortControllerRef.current.signal,
       })
 
       if (!response.ok) {
@@ -179,7 +198,8 @@ function App() {
         }
       }
     } catch (err) {
-      setError(err.name === 'TypeError'
+      if (err.name === 'AbortError') { /* annulation volontaire — pas d'erreur */ }
+      else setError(err.name === 'TypeError'
         ? 'Impossible de contacter le serveur. Vérifiez que le backend est lancé.'
         : err.message || 'Une erreur inattendue est survenue.')
     } finally {
@@ -241,14 +261,15 @@ function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {pipelineAgents.map((agent) => {
                 const colors = {
-                  pending:  'var(--text-muted)',
-                  running:  'var(--accent-primary-light)',
-                  success:  '#4ade80',
-                  skipped:  '#64748b',
-                  error:    '#f87171',
-                  retrying: '#facc15',
+                  pending:   'var(--text-muted)',
+                  running:   'var(--accent-primary-light)',
+                  success:   '#4ade80',
+                  skipped:   '#64748b',
+                  error:     '#f87171',
+                  retrying:  '#facc15',
+                  cancelled: '#94a3b8',
                 }
-                const icons = { pending: '○', success: '✓', skipped: '✓', error: '✗', retrying: '↻' }
+                const icons = { pending: '○', success: '✓', skipped: '✓', error: '✗', retrying: '↻', cancelled: '✕' }
                 const barWidth = ['success', 'skipped'].includes(agent.status) ? '100%'
                   : agent.status === 'running' ? '60%' : '0%'
 
@@ -289,7 +310,7 @@ function App() {
                 )
               })}
             </div>
-            {/* Résumé global */}
+            {/* Résumé global + bouton annuler */}
             <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <div style={{ flex: 1, height: '6px', background: 'var(--bg-primary)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -303,6 +324,28 @@ function App() {
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                   {pipelineAgents.filter(a => ['success', 'skipped'].includes(a.status)).length} / 4 agents
                 </span>
+                {isLoading && (
+                  <button
+                    onClick={handleCancel}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      padding: '4px 10px', borderRadius: '6px',
+                      border: '1px solid var(--border-subtle)',
+                      background: 'transparent',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.75rem', fontWeight: 500,
+                      cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                      transition: 'all 0.2s', whiteSpace: 'nowrap',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#f87171'; e.currentTarget.style.color = '#f87171' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                    Annuler
+                  </button>
+                )}
               </div>
             </div>
             {/* Bouton reprendre — affiché uniquement si un agent a échoué */}
@@ -374,9 +417,31 @@ function App() {
         )}
 
         {/* Loading — visible jusqu'au 1er token reçu */}
-        {isLoading && (
+        {isLoading && !isV2Mode && (
           <div className="glass-card">
             <LoadingSpinner moteur={lastFormData?.moteur} />
+            <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '16px' }}>
+              <button
+                onClick={handleCancel}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '7px 16px', borderRadius: '8px',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'transparent',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.82rem', fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#f87171'; e.currentTarget.style.color = '#f87171' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+                Annuler la génération
+              </button>
+            </div>
           </div>
         )}
 

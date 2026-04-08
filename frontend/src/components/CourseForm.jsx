@@ -1,16 +1,9 @@
 import { useState, useEffect } from 'react'
+import axios from 'axios'
 
-// Spécialités avec leurs niveaux autorisés
-const SPECIALITES = [
-    { value: 'GFC',  label: 'GFC — Gestion, Finance et Comptabilité',          niveaux: ['B1', 'B2', 'B3', 'M1', 'M2'] },
-    { value: 'RH',   label: 'RH — Ressources Humaines et Management',           niveaux: ['B1', 'B2', 'B3', 'M1', 'M2'] },
-    { value: 'IWA',  label: 'IWA — Informatique Web et Applicatif',              niveaux: ['B1', 'B2', 'B3'] },
-    { value: 'DIA',  label: 'DIA — Data Science et Intelligence Artificielle',   niveaux: ['B1', 'B2', 'B3', 'M1', 'M2'] },
-    { value: 'MCD',  label: 'MCD — Marketing et Communication Digitale',         niveaux: ['B1', 'B2', 'B3'] },
-    { value: 'GPE',  label: 'GPE — Gestion, Projet et Entrepreneuriat',          niveaux: ['M1', 'M2'] },
-]
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Labels affichés dans le select niveau
+// Labels fixes pour les niveaux (pas de config nécessaire, noms standardisés)
 const NIVEAUX_LABELS = {
     B1: 'B1 — 1ʳᵉ année Bachelor',
     B2: 'B2 — 2ᵉ année Bachelor',
@@ -18,11 +11,11 @@ const NIVEAUX_LABELS = {
     M1: 'M1 — 1ʳᵉ année Master',
     M2: 'M2 — 2ᵉ année Master',
 }
-
-// Groupes pour l'affichage (optgroup)
 const NIVEAUX_GROUPE = { B1: 'Bachelor', B2: 'Bachelor', B3: 'Bachelor', M1: 'Master', M2: 'Master' }
 
 export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode, onToggleMode }) {
+    const [specialites, setSpecialites]     = useState([])
+    const [specialitesError, setSpecialitesError] = useState(false)
     const [formData, setFormData] = useState({
         specialite: '',
         niveau: '',
@@ -31,8 +24,15 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
         moteur: 'mistral',
     })
 
+    // Chargement des spécialités depuis l'API au montage
+    useEffect(() => {
+        axios.get(`${API_URL}/specialites`)
+            .then(r => setSpecialites(r.data))
+            .catch(() => setSpecialitesError(true))
+    }, [])
+
     // Niveaux disponibles pour la spécialité sélectionnée
-    const specialiteSelectionnee = SPECIALITES.find(s => s.value === formData.specialite)
+    const specialiteSelectionnee = specialites.find(s => s.value === formData.specialite)
     const niveauxDisponibles = specialiteSelectionnee ? specialiteSelectionnee.niveaux : []
 
     // Grouper les niveaux disponibles par Bachelor / Master
@@ -44,7 +44,7 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
     const handleChange = (e) => {
         const { name, value } = e.target
         if (name === 'specialite') {
-            const spec = SPECIALITES.find(s => s.value === value)
+            const spec = specialites.find(s => s.value === value)
             setFormData({ ...formData, specialite: value, niveau: spec ? spec.niveaux[0] : '' })
         } else {
             setFormData({ ...formData, [name]: value })
@@ -137,13 +137,21 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
                         className="form-select"
                         value={formData.specialite}
                         onChange={handleChange}
+                        disabled={specialites.length === 0}
                         required
                     >
-                        <option value="" disabled>Choisir une spécialité…</option>
-                        {SPECIALITES.map(s => (
+                        <option value="" disabled>
+                            {specialitesError ? 'Erreur de chargement' : specialites.length === 0 ? 'Chargement…' : 'Choisir une spécialité…'}
+                        </option>
+                        {specialites.map(s => (
                             <option key={s.value} value={s.value}>{s.label}</option>
                         ))}
                     </select>
+                    {specialitesError && (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--error)', marginTop: '4px' }}>
+                            Impossible de charger les spécialités. Vérifiez que le backend est lancé.
+                        </p>
+                    )}
                 </div>
 
                 {/* Niveau */}
