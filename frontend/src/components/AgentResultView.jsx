@@ -67,7 +67,10 @@ export default function AgentResultView({ pipelineResult, formParams }) {
             const url = URL.createObjectURL(new Blob([response.data]))
             const a = document.createElement('a')
             a.href = url
-            a.download = `${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}.pptx`
+            const slugify = s => (s || '').trim().replace(/\s+/g, '-')
+            const pptxName = [formParams?.specialite, formParams?.niveau, formParams?.module, formParams?.chapitre]
+                .filter(Boolean).map(slugify).join('-')
+            a.download = `${pptxName || 'cours'}.pptx`
             document.body.appendChild(a)
             a.click()
             document.body.removeChild(a)

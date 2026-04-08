@@ -28,7 +28,10 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
             const url = URL.createObjectURL(new Blob([response.data]))
             const a = document.createElement('a')
             a.href = url
-            a.download = `${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}.pptx`
+            const slugify = s => (s || '').trim().replace(/\s+/g, '-')
+            const pptxName = [formParams?.specialite, formParams?.niveau, formParams?.module, formParams?.chapitre]
+                .filter(Boolean).map(slugify).join('-')
+            a.download = `${pptxName || 'cours'}.pptx`
             document.body.appendChild(a)
             a.click()
             document.body.removeChild(a)
@@ -91,23 +94,36 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
     }
 
     const handleCopyHtml = async () => {
-        try {
-            const el = document.querySelector('.course-content')
-            const html = el.innerHTML
-            const blob = new Blob([html], { type: 'text/html' })
-            const item = new ClipboardItem({ 'text/html': blob })
-            await navigator.clipboard.write([item])
-            setCopiedHtml(true)
-            setTimeout(() => setCopiedHtml(false), 2500)
-        } catch (err) {
-            // Fallback : copier le HTML en texte brut
-            const el = document.querySelector('.course-content')
-            const textarea = document.createElement('textarea')
-            textarea.value = el.innerHTML
-            document.body.appendChild(textarea)
-            textarea.select()
-            document.execCommand('copy')
-            document.body.removeChild(textarea)
+        const el = document.querySelector('.course-content')
+        let success = false
+
+        // Tentative 1 : ClipboardItem API (copie HTML+texte natif, Chrome moderne)
+        if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+            try {
+                await navigator.clipboard.write([
+                    new ClipboardItem({
+                        'text/html':  new Blob([el.innerHTML],                       { type: 'text/html' }),
+                        'text/plain': new Blob([el.innerText || el.textContent || ''], { type: 'text/plain' }),
+                    })
+                ])
+                success = true
+            } catch (_) { /* tombe sur le fallback */ }
+        }
+
+        // Tentative 2 : sélection DOM + execCommand (copie le contenu rendu, pas les tags bruts)
+        if (!success) {
+            try {
+                const range = document.createRange()
+                range.selectNodeContents(el)
+                const sel = window.getSelection()
+                sel.removeAllRanges()
+                sel.addRange(range)
+                success = document.execCommand('copy')
+                sel.removeAllRanges()
+            } catch (_) { /* échec silencieux */ }
+        }
+
+        if (success) {
             setCopiedHtml(true)
             setTimeout(() => setCopiedHtml(false), 2500)
         }

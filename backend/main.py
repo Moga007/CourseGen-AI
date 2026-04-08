@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -370,9 +370,9 @@ async def generate_pptx(request: PptxRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint : {e}")
 
-    # Sanitise le nom de fichier : convertit les accents en ASCII, retire les chars spéciaux
-    safe_name = unicodedata.normalize("NFKD", request.chapitre).encode("ascii", "ignore").decode()
-    filename = safe_name[:60].replace(" ", "_").replace("/", "-") + ".pptx"
+    # Nom de fichier : Spécialité-Niveau-Module-Chapitre.pptx
+    parts = [request.specialite, request.niveau, request.module, request.chapitre]
+    filename = "-".join(_slugify(p) for p in parts if p) + ".pptx"
     return StreamingResponse(
         iter([pptx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -409,14 +409,35 @@ async def generate_quiz(request: QuizRequest):
     return QuizResponse(contenu_gift=contenu_gift, moteur_utilise=engine.label)
 
 
+@app.get("/historique/meta")
+async def get_historique_meta(db: Session = Depends(get_db)):
+    """Retourne les valeurs distinctes de spécialité et moteur pour les filtres."""
+    specialites = [r[0] for r in db.query(HistoriqueEntry.specialite).distinct().all()]
+    moteurs     = [r[0] for r in db.query(HistoriqueEntry.moteur).distinct().all()]
+    return {"specialites": sorted(specialites), "moteurs": sorted(moteurs)}
+
+
 @app.get("/historique")
-async def get_historique(db: Session = Depends(get_db)):
-    entries = (
-        db.query(HistoriqueEntry)
-        .order_by(HistoriqueEntry.date.desc())
-        .all()
-    )
-    return [e.to_dict() for e in entries]
+async def get_historique(
+    db:         Session = Depends(get_db),
+    page:       int = Query(1, ge=1),
+    limit:      int = Query(8, ge=1, le=100),
+    specialite: str | None = Query(None),
+    moteur:     str | None = Query(None),
+):
+    q = db.query(HistoriqueEntry).order_by(HistoriqueEntry.date.desc())
+    if specialite:
+        q = q.filter(HistoriqueEntry.specialite == specialite)
+    if moteur:
+        q = q.filter(HistoriqueEntry.moteur == moteur)
+    total   = q.count()
+    entries = q.offset((page - 1) * limit).limit(limit).all()
+    return {
+        "items":  [e.to_dict() for e in entries],
+        "total":  total,
+        "page":   page,
+        "pages":  max(1, -(-total // limit)),  # ceil division
+    }
 
 
 # ─────────────────────────────────────────────
@@ -442,8 +463,9 @@ async def generate_v2_pptx(request: PptxV2Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint V2 : {e}")
 
-    safe_name = unicodedata.normalize("NFKD", request.chapitre).encode("ascii", "ignore").decode()
-    filename  = safe_name[:60].replace(" ", "_").replace("/", "-") + ".pptx"
+    # Nom de fichier : Spécialité-Niveau-Module-Chapitre.pptx
+    parts = [request.specialite, request.niveau, request.module, request.chapitre]
+    filename = "-".join(_slugify(p) for p in parts if p) + ".pptx"
     return StreamingResponse(
         iter([pptx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",

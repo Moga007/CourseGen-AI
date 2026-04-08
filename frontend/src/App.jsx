@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Header from './components/Header'
 import CourseForm from './components/CourseForm'
 import CourseDisplay from './components/CourseDisplay'
@@ -152,6 +152,11 @@ function App() {
               setPipelineAgents(prev => prev.map(a =>
                 a.name === event.agent ? { ...a, status: 'running' } : a
               ))
+            } else if (event.event === 'agent_skipped') {
+              // Agent déjà exécuté lors d'une reprise — on restaure son statut
+              setPipelineAgents(prev => prev.map(a =>
+                a.name === event.agent ? { ...a, status: 'skipped' } : a
+              ))
             } else if (event.event === 'agent_success') {
               setPipelineAgents(prev => prev.map(a =>
                 a.name === event.agent ? { ...a, status: 'success', duration: event.duration } : a
@@ -161,10 +166,10 @@ function App() {
                 a.name === event.agent ? { ...a, status: 'error', error: event.error } : a
               ))
               if (event.resume_token) setV2ResumeToken(event.resume_token)
-              setError(`L'${event.agent} a échoué : ${event.error}`)
               setIsLoading(false)
             } else if (event.event === 'pipeline_complete') {
               setPipelineV2Data(event)
+              setV2ResumeToken(null)  // plus besoin du token après un succès
               setIsLoading(false)
             } else if (event.event === 'fatal_error') {
               setError(event.error)
@@ -187,6 +192,22 @@ function App() {
       handleGenerateV2(lastFormData)
     }
   }
+
+  // ── Bouton scroll-to-bottom ───────────────────────────────────────────────
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+
+  useEffect(() => {
+    const onScroll = () => {
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40
+      setShowScrollBtn(window.scrollY > 200 && !atBottom)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  const scrollToBottom = () =>
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
 
   const handleToggleMode = (mode) => {
     setIsV2Mode(mode)
@@ -218,30 +239,48 @@ function App() {
               Pipeline Multi-Agents
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {pipelineAgents.map((agent, i) => {
-                const colors = { pending: 'var(--text-muted)', running: 'var(--accent-primary-light)', success: '#4ade80', error: '#f87171', retrying: '#facc15' }
-                const icons  = { pending: '○', success: '✓', error: '✗', retrying: '↻' }
+              {pipelineAgents.map((agent) => {
+                const colors = {
+                  pending:  'var(--text-muted)',
+                  running:  'var(--accent-primary-light)',
+                  success:  '#4ade80',
+                  skipped:  '#64748b',
+                  error:    '#f87171',
+                  retrying: '#facc15',
+                }
+                const icons = { pending: '○', success: '✓', skipped: '✓', error: '✗', retrying: '↻' }
+                const barWidth = ['success', 'skipped'].includes(agent.status) ? '100%'
+                  : agent.status === 'running' ? '60%' : '0%'
+
                 return (
                   <div key={agent.name} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     {/* Icône statut */}
                     <div style={{ width: '20px', textAlign: 'center', color: colors[agent.status] || colors.pending, fontSize: '14px' }}>
                       {agent.status === 'running'
-                        ? <span className="loading-spinner" style={{ display: 'inline-block', width: '14px', height: '14px', border: '2px solid var(--accent-primary-light)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        ? <span style={{ display: 'inline-block', width: '14px', height: '14px', border: '2px solid var(--accent-primary-light)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
                         : icons[agent.status] || '○'}
                     </div>
-                    {/* Label */}
-                    <span style={{ fontSize: '13px', fontWeight: agent.status === 'running' ? '600' : '400', color: agent.status === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)', flex: 1 }}>
-                      {agent.label}
-                    </span>
+                    {/* Label + détail erreur */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: '13px', fontWeight: agent.status === 'running' ? '600' : '400', color: agent.status === 'pending' ? 'var(--text-muted)' : agent.status === 'skipped' ? '#64748b' : 'var(--text-primary)' }}>
+                        {agent.label}
+                        {agent.status === 'skipped' && <span style={{ fontSize: '11px', marginLeft: '6px', color: '#64748b' }}>(reprise)</span>}
+                      </span>
+                      {agent.status === 'error' && agent.error && (
+                        <p style={{ fontSize: '11px', color: '#f87171', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {agent.error}
+                        </p>
+                      )}
+                    </div>
                     {/* Durée */}
                     {agent.status === 'success' && agent.duration && (
-                      <span style={{ fontSize: '11px', color: '#4ade80' }}>{agent.duration}s</span>
+                      <span style={{ fontSize: '11px', color: '#4ade80', whiteSpace: 'nowrap' }}>{agent.duration}s</span>
                     )}
                     {/* Barre de progression */}
-                    <div style={{ width: '80px', height: '4px', background: 'var(--bg-primary)', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div style={{ width: '80px', height: '4px', background: 'var(--bg-primary)', borderRadius: '2px', overflow: 'hidden', flexShrink: 0 }}>
                       <div style={{
                         height: '100%', borderRadius: '2px',
-                        width: agent.status === 'success' ? '100%' : agent.status === 'running' ? '60%' : '0%',
+                        width: barWidth,
                         background: colors[agent.status] || 'transparent',
                         transition: 'width 0.4s ease',
                       }} />
@@ -256,16 +295,48 @@ function App() {
                 <div style={{ flex: 1, height: '6px', background: 'var(--bg-primary)', borderRadius: '3px', overflow: 'hidden' }}>
                   <div style={{
                     height: '100%', borderRadius: '3px',
-                    width: `${pipelineAgents.filter(a => a.status === 'success').length * 25}%`,
+                    width: `${pipelineAgents.filter(a => ['success', 'skipped'].includes(a.status)).length * 25}%`,
                     background: 'linear-gradient(90deg, var(--accent-primary), var(--accent-primary-light))',
                     transition: 'width 0.4s ease',
                   }} />
                 </div>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                  {pipelineAgents.filter(a => a.status === 'success').length} / 4 agents
+                  {pipelineAgents.filter(a => ['success', 'skipped'].includes(a.status)).length} / 4 agents
                 </span>
               </div>
             </div>
+            {/* Bouton reprendre — affiché uniquement si un agent a échoué */}
+            {v2ResumeToken && !isLoading && (() => {
+              const failedAgent = pipelineAgents.find(a => a.status === 'error')
+              return failedAgent ? (
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {v2ResumeToken.completed_agents.length} agent{v2ResumeToken.completed_agents.length > 1 ? 's' : ''} déjà complété{v2ResumeToken.completed_agents.length > 1 ? 's' : ''} — la reprise ne les relancera pas.
+                  </p>
+                  <button
+                    onClick={() => handleRetryFromAgent()}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                      padding: '8px 16px', borderRadius: '8px',
+                      border: '1px solid #f87171',
+                      background: 'rgba(248,113,113,0.1)',
+                      color: '#f87171',
+                      fontSize: '0.82rem', fontWeight: 600,
+                      cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                      transition: 'all 0.2s',
+                      whiteSpace: 'nowrap',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(248,113,113,0.2)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(248,113,113,0.1)' }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="1,4 1,10 7,10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                    Reprendre depuis {failedAgent.label}
+                  </button>
+                </div>
+              ) : null
+            })()}
           </div>
         )}
 
@@ -290,8 +361,8 @@ function App() {
           </div>
         )}
 
-        {/* Error */}
-        {error && (
+        {/* Error — masqué si c'est un échec d'agent V2 (déjà affiché dans le panel pipeline) */}
+        {error && !(isV2Mode && v2ResumeToken) && (
           <div className="error-message animate-fade-in-up">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
@@ -352,6 +423,40 @@ function App() {
         {/* History */}
         <HistorySection onReplay={handleReplay} refreshKey={historyRefreshKey} />
       </main>
+
+      {/* Bouton flottant — descendre en bas de page */}
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          title="Aller en bas de la page"
+          style={{
+            position: 'fixed',
+            bottom: '28px',
+            right: '24px',
+            zIndex: 40,
+            width: '44px',
+            height: '44px',
+            borderRadius: '50%',
+            border: '1px solid var(--border-active)',
+            background: 'rgba(15, 15, 30, 0.85)',
+            backdropFilter: 'blur(12px)',
+            color: 'var(--accent-primary-light)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            opacity: 0.85,
+            transition: 'opacity 0.2s, transform 0.2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(2px)'; e.currentTarget.style.opacity = '1' }}
+          onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.opacity = '0.85' }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
 
       {/* Footer */}
       <footer style={{
