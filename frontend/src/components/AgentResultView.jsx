@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import Markdown from 'react-markdown'
+import { SSE_EVENTS } from '../constants/sseEvents'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -111,7 +112,7 @@ export default function AgentResultView({ pipelineResult, formParams }) {
                     if (!line.startsWith('data: ')) continue
                     try {
                         const data = JSON.parse(line.slice(6))
-                        if (data.event === 'quiz_complete') {
+                        if (data.event === SSE_EVENTS.QUIZ_COMPLETE) {
                             const blob = new Blob([data.contenu_gift], { type: 'text/plain;charset=utf-8' })
                             const url = URL.createObjectURL(blob)
                             const a = document.createElement('a')
@@ -121,7 +122,7 @@ export default function AgentResultView({ pipelineResult, formParams }) {
                             a.click()
                             document.body.removeChild(a)
                             URL.revokeObjectURL(url)
-                        } else if (data.event === 'agent_error' || data.event === 'fatal_error') {
+                        } else if (data.event === SSE_EVENTS.AGENT_ERROR || data.event === SSE_EVENTS.FATAL_ERROR) {
                             setQuizError(data.error || 'Erreur lors de la génération du quiz.')
                             setTimeout(() => setQuizError(null), 6000)
                         }

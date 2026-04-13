@@ -9,6 +9,7 @@ python-dotenv==1.0.1
 pydantic==2.10.4
 python-pptx>=1.0.0
 sqlalchemy>=2.0.0
+slowapi>=0.1.9
 
 # Tests
 pytest>=8.0.0

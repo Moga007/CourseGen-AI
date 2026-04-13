@@ -4,6 +4,7 @@ import CourseForm from './components/CourseForm'
 import CourseDisplay from './components/CourseDisplay'
 import LoadingSpinner from './components/LoadingSpinner'
 import HistorySection from './components/HistorySection'
+import { SSE_EVENTS } from './constants/sseEvents'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -94,6 +95,19 @@ function App() {
           } catch { /* ligne SSE malformée — on ignore */ }
         }
       }
+
+      // Flush de l'éventuel dernier événement resté dans le buffer (stream terminé sans \n final)
+      if (buffer.trim().startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.trim().slice(6))
+          if (data.chunk) { accumulated += data.chunk; setStreamingContent(accumulated) }
+          else if (data.done) {
+            setCourseData({ contenu: accumulated, moteur_utilise: data.moteur_utilise })
+            setStreamingContent('')
+            setHistoryRefreshKey(prev => prev + 1)
+          }
+        } catch { /* ignore */ }
+      }
     } catch (err) {
       if (err.name === 'AbortError') { /* annulation volontaire — pas d'erreur */ }
       else if (err.name === 'TypeError') {
@@ -112,6 +126,7 @@ function App() {
       setIsV2Mode(true)
       setCourseData(null)
       setPipelineV2Data(null)
+      setV2ResumeToken(null) // nettoie l'éventuel token d'une session précédente
     }
     setReplayData(formData)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -154,6 +169,35 @@ function App() {
       const decoder = new TextDecoder()
       let buffer = ''
 
+      const processV2Event = (event) => {
+        if (event.event === SSE_EVENTS.AGENT_START) {
+          setPipelineAgents(prev => prev.map(a =>
+            a.name === event.agent ? { ...a, status: 'running' } : a
+          ))
+        } else if (event.event === SSE_EVENTS.AGENT_SKIPPED) {
+          setPipelineAgents(prev => prev.map(a =>
+            a.name === event.agent ? { ...a, status: 'skipped' } : a
+          ))
+        } else if (event.event === SSE_EVENTS.AGENT_SUCCESS) {
+          setPipelineAgents(prev => prev.map(a =>
+            a.name === event.agent ? { ...a, status: 'success', duration: event.duration } : a
+          ))
+        } else if (event.event === SSE_EVENTS.AGENT_ERROR) {
+          setPipelineAgents(prev => prev.map(a =>
+            a.name === event.agent ? { ...a, status: 'error', error: event.error } : a
+          ))
+          if (event.resume_token) setV2ResumeToken(event.resume_token)
+          setIsLoading(false)
+        } else if (event.event === SSE_EVENTS.PIPELINE_COMPLETE) {
+          setPipelineV2Data(event)
+          setV2ResumeToken(null)
+          setIsLoading(false)
+        } else if (event.event === SSE_EVENTS.FATAL_ERROR) {
+          setError(event.error)
+          setIsLoading(false)
+        }
+      }
+
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
@@ -164,38 +208,13 @@ function App() {
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
-          try {
-            const event = JSON.parse(line.slice(6))
-
-            if (event.event === 'agent_start') {
-              setPipelineAgents(prev => prev.map(a =>
-                a.name === event.agent ? { ...a, status: 'running' } : a
-              ))
-            } else if (event.event === 'agent_skipped') {
-              // Agent déjà exécuté lors d'une reprise — on restaure son statut
-              setPipelineAgents(prev => prev.map(a =>
-                a.name === event.agent ? { ...a, status: 'skipped' } : a
-              ))
-            } else if (event.event === 'agent_success') {
-              setPipelineAgents(prev => prev.map(a =>
-                a.name === event.agent ? { ...a, status: 'success', duration: event.duration } : a
-              ))
-            } else if (event.event === 'agent_error') {
-              setPipelineAgents(prev => prev.map(a =>
-                a.name === event.agent ? { ...a, status: 'error', error: event.error } : a
-              ))
-              if (event.resume_token) setV2ResumeToken(event.resume_token)
-              setIsLoading(false)
-            } else if (event.event === 'pipeline_complete') {
-              setPipelineV2Data(event)
-              setV2ResumeToken(null)  // plus besoin du token après un succès
-              setIsLoading(false)
-            } else if (event.event === 'fatal_error') {
-              setError(event.error)
-              setIsLoading(false)
-            }
-          } catch { /* ligne SSE malformée */ }
+          try { processV2Event(JSON.parse(line.slice(6))) } catch { /* SSE malformé */ }
         }
+      }
+
+      // Flush du dernier événement resté dans le buffer sans \n final
+      if (buffer.trim().startsWith('data: ')) {
+        try { processV2Event(JSON.parse(buffer.trim().slice(6))) } catch { /* ignore */ }
       }
     } catch (err) {
       if (err.name === 'AbortError') { /* annulation volontaire — pas d'erreur */ }

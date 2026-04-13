@@ -13,7 +13,7 @@ import string
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Column, DateTime, Float, String, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Float, String, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DB_PATH = Path(__file__).parent / "coursegen.db"
@@ -41,6 +41,7 @@ class HistoriqueEntry(Base):
     chapitre = Column(String(300), nullable=False)
     moteur = Column(String(100), nullable=False)
     duree_secondes = Column(Float, nullable=False)
+    is_pipeline_v2 = Column(Boolean, nullable=False, default=False, server_default="0")
 
     def to_dict(self) -> dict:
         return {
@@ -52,6 +53,7 @@ class HistoriqueEntry(Base):
             "chapitre": self.chapitre,
             "moteur": self.moteur,
             "duree_secondes": self.duree_secondes,
+            "is_pipeline_v2": bool(self.is_pipeline_v2),
         }
 
 
@@ -67,6 +69,16 @@ def generate_id(length: int = 6) -> str:
 def init_db() -> None:
     """Crée les tables si elles n'existent pas encore."""
     Base.metadata.create_all(bind=engine)
+
+
+def migrate_db_schema() -> None:
+    """Ajoute les colonnes manquantes si la DB existe déjà avec un ancien schéma."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("PRAGMA table_info(historique)")).fetchall()
+        col_names = {row[1] for row in rows}
+        if "is_pipeline_v2" not in col_names:
+            conn.execute(text("ALTER TABLE historique ADD COLUMN is_pipeline_v2 INTEGER NOT NULL DEFAULT 0"))
+            conn.commit()
 
 
 def get_db():

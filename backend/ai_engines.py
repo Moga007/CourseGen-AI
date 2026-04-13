@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 from dotenv import load_dotenv
 
@@ -25,6 +25,7 @@ _CONTINUATION_MSG = (
 )
 
 _MAX_CONTINUATIONS = 4
+_DEFAULT_MAX_TOKENS = 8192
 
 
 # ─────────────────────────────────────────────
@@ -40,17 +41,17 @@ class BaseEngine(ABC):
     3. Appeler register(MonMoteur()) en bas de fichier
     """
 
-    name: str                   # identifiant interne  (ex: "mistral")
-    label: str                  # libellé affiché      (ex: "Mistral Large (Mistral AI)")
+    name: str                        # identifiant interne  (ex: "mistral")
+    label: str                       # libellé affiché      (ex: "Mistral Large (Mistral AI)")
     uses_light_prompt: bool = False  # True pour les moteurs nécessitant un prompt allégé
 
     @abstractmethod
     async def generate(self, system_prompt: str, user_message: str) -> str:
-        """Retourne le contenu complet en une seule requête."""
+        """Retourne le contenu complet en une seule requête (avec continuation si besoin)."""
 
     @abstractmethod
     async def stream(self, system_prompt: str, user_message: str) -> AsyncIterator[str]:
-        """Génère le contenu token par token (async generator)."""
+        """Génère le contenu token par token (async generator, avec continuation si besoin)."""
 
     async def generate_with_model(
         self,
@@ -66,6 +67,22 @@ class BaseEngine(ABC):
         Les sous-classes Mistral et Claude surchargent cette méthode.
         """
         return await self.generate(system_prompt, user_message)
+
+    # ── Helpers de continuation partagés ───────────────────────────────────────
+
+    @staticmethod
+    def _add_continuation_turn(messages: list[dict], chunk: str) -> None:
+        """Ajoute le tour assistant + relance au format OpenAI/Mistral/Groq.
+        Appelé quand le LLM s'est arrêté pour cause de limite de tokens (finish_reason=length).
+        """
+        messages.append({"role": "assistant", "content": chunk})
+        messages.append({"role": "user", "content": _CONTINUATION_MSG})
+
+    @staticmethod
+    def _add_continuation_turn_gemini(contents: list[dict], chunk: str) -> None:
+        """Idem pour Gemini qui utilise un format de messages différent."""
+        contents.append({"role": "model", "parts": [{"text": chunk}]})
+        contents.append({"role": "user", "parts": [{"text": _CONTINUATION_MSG}]})
 
 
 # ─────────────────────────────────────────────
@@ -87,21 +104,20 @@ class MistralEngine(BaseEngine):
         client = self._get_client()
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "user",   "content": user_message},
         ]
         full_content = ""
         for _ in range(_MAX_CONTINUATIONS + 1):
             response = client.chat.complete(
                 model="mistral-large-latest",
                 messages=messages,
-                max_tokens=8192,
+                max_tokens=_DEFAULT_MAX_TOKENS,
             )
             chunk = response.choices[0].message.content or ""
             full_content += chunk
             if response.choices[0].finish_reason != "length":
                 break
-            messages.append({"role": "assistant", "content": chunk})
-            messages.append({"role": "user", "content": _CONTINUATION_MSG})
+            self._add_continuation_turn(messages, chunk)
         return full_content
 
     async def generate_with_model(
@@ -112,16 +128,18 @@ class MistralEngine(BaseEngine):
         max_tokens: int = 4096,
         temperature: float = 0.5,
     ) -> str:
-        """Version configurables pour le pipeline V2. Appel synchrone wrappé dans to_thread."""
+        """Version avec paramètres configurables pour le pipeline V2.
+        Appel synchrone wrappé dans asyncio.to_thread pour ne pas bloquer la boucle.
+        """
         import asyncio
         client = self._get_client()
         model = model_id or "mistral-large-latest"
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "user",   "content": user_message},
         ]
 
-        def _sync_call():
+        def _sync_call() -> str:
             response = client.chat.complete(
                 model=model,
                 messages=messages,
@@ -136,7 +154,7 @@ class MistralEngine(BaseEngine):
         client = self._get_client()
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "user",   "content": user_message},
         ]
         for _ in range(_MAX_CONTINUATIONS + 1):
             buffered = ""
@@ -144,7 +162,7 @@ class MistralEngine(BaseEngine):
             async with (await client.chat.stream_async(
                 model="mistral-large-latest",
                 messages=messages,
-                max_tokens=8192,
+                max_tokens=_DEFAULT_MAX_TOKENS,
             )) as stream:
                 async for event in stream:
                     delta = event.data.choices[0].delta.content or ""
@@ -155,14 +173,13 @@ class MistralEngine(BaseEngine):
                         hit_limit = True
             if not hit_limit:
                 break
-            messages.append({"role": "assistant", "content": buffered})
-            messages.append({"role": "user", "content": _CONTINUATION_MSG})
+            self._add_continuation_turn(messages, buffered)
 
 
 class ClaudeEngine(BaseEngine):
     name = "claude"
     label = "Claude Sonnet (Anthropic)"
-    DEFAULT_MODEL = "claude-sonnet-4-5"   # modèle par défaut — modifier ici si besoin
+    DEFAULT_MODEL = "claude-sonnet-4-5"  # modèle par défaut — modifier ici si besoin
 
     def _get_client(self, async_mode: bool = False):
         from anthropic import Anthropic, AsyncAnthropic
@@ -198,7 +215,7 @@ class ClaudeEngine(BaseEngine):
         for _ in range(_MAX_CONTINUATIONS + 1):
             response = client.messages.create(
                 model=self.DEFAULT_MODEL,
-                max_tokens=8192,
+                max_tokens=_DEFAULT_MAX_TOKENS,
                 system=system_prompt,
                 messages=messages,
             )
@@ -206,8 +223,7 @@ class ClaudeEngine(BaseEngine):
             full_content += chunk
             if response.stop_reason != "max_tokens":
                 break
-            messages.append({"role": "assistant", "content": chunk})
-            messages.append({"role": "user", "content": _CONTINUATION_MSG})
+            self._add_continuation_turn(messages, chunk)
         return full_content
 
     async def stream(self, system_prompt: str, user_message: str):
@@ -218,7 +234,7 @@ class ClaudeEngine(BaseEngine):
             stop_reason = None
             async with client.messages.stream(
                 model=self.DEFAULT_MODEL,
-                max_tokens=8192,
+                max_tokens=_DEFAULT_MAX_TOKENS,
                 system=system_prompt,
                 messages=messages,
             ) as stream:
@@ -229,8 +245,7 @@ class ClaudeEngine(BaseEngine):
                 stop_reason = final.stop_reason
             if stop_reason != "max_tokens":
                 break
-            messages.append({"role": "assistant", "content": buffered})
-            messages.append({"role": "user", "content": _CONTINUATION_MSG})
+            self._add_continuation_turn(messages, buffered)
 
 
 class GroqEngine(BaseEngine):
@@ -248,28 +263,27 @@ class GroqEngine(BaseEngine):
         client = self._get_client()
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "user",   "content": user_message},
         ]
         full_content = ""
         for _ in range(_MAX_CONTINUATIONS + 1):
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                max_tokens=8192,
+                max_tokens=_DEFAULT_MAX_TOKENS,
             )
             chunk = response.choices[0].message.content or ""
             full_content += chunk
             if response.choices[0].finish_reason != "length":
                 break
-            messages.append({"role": "assistant", "content": chunk})
-            messages.append({"role": "user", "content": _CONTINUATION_MSG})
+            self._add_continuation_turn(messages, chunk)
         return full_content
 
     async def stream(self, system_prompt: str, user_message: str):
         client = self._get_client(async_mode=True)
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "user",   "content": user_message},
         ]
         for _ in range(_MAX_CONTINUATIONS + 1):
             buffered = ""
@@ -277,7 +291,7 @@ class GroqEngine(BaseEngine):
             stream = await client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                max_tokens=8192,
+                max_tokens=_DEFAULT_MAX_TOKENS,
                 stream=True,
             )
             async for chunk in stream:
@@ -289,8 +303,7 @@ class GroqEngine(BaseEngine):
                     finish_reason = chunk.choices[0].finish_reason
             if finish_reason != "length":
                 break
-            messages.append({"role": "assistant", "content": buffered})
-            messages.append({"role": "user", "content": _CONTINUATION_MSG})
+            self._add_continuation_turn(messages, buffered)
 
 
 class GeminiEngine(BaseEngine):
@@ -306,45 +319,46 @@ class GeminiEngine(BaseEngine):
             raise ValueError("GOOGLE_API_KEY non configurée. Ajoutez votre clé dans le fichier .env")
         return genai.Client(api_key=api_key)
 
-    async def generate(self, system_prompt: str, user_message: str) -> str:
+    def _make_config(self, system_prompt: str, max_tokens: int = _DEFAULT_MAX_TOKENS):
         from google.genai import types
+        return types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=max_tokens,
+        )
+
+    @staticmethod
+    def _is_token_limited(response) -> bool:
+        """Retourne True si la réponse a été coupée à cause de la limite de tokens."""
+        if not response.candidates:
+            return False
+        reason = response.candidates[0].finish_reason
+        return bool(reason and reason.name == "MAX_TOKENS")
+
+    async def generate(self, system_prompt: str, user_message: str) -> str:
         client = self._get_client()
         contents = [{"role": "user", "parts": [{"text": user_message}]}]
-        config = types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=8192,
-        )
+        config = self._make_config(system_prompt)
         full_content = ""
         for _ in range(_MAX_CONTINUATIONS + 1):
             response = await client.aio.models.generate_content(
-                model=self._MODEL,
-                contents=contents,
-                config=config,
+                model=self._MODEL, contents=contents, config=config,
             )
             chunk = response.text or ""
             full_content += chunk
-            finish_reason = response.candidates[0].finish_reason if response.candidates else None
-            if not finish_reason or finish_reason.name != "MAX_TOKENS":
+            if not self._is_token_limited(response):
                 break
-            contents.append({"role": "model", "parts": [{"text": chunk}]})
-            contents.append({"role": "user", "parts": [{"text": _CONTINUATION_MSG}]})
+            self._add_continuation_turn_gemini(contents, chunk)
         return full_content
 
     async def stream(self, system_prompt: str, user_message: str):
-        from google.genai import types
         client = self._get_client()
         contents = [{"role": "user", "parts": [{"text": user_message}]}]
-        config = types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=8192,
-        )
+        config = self._make_config(system_prompt)
         for _ in range(_MAX_CONTINUATIONS + 1):
             buffered = ""
             hit_limit = False
             async for chunk in await client.aio.models.generate_content_stream(
-                model=self._MODEL,
-                contents=contents,
-                config=config,
+                model=self._MODEL, contents=contents, config=config,
             ):
                 if chunk.text:
                     buffered += chunk.text
@@ -355,8 +369,7 @@ class GeminiEngine(BaseEngine):
                         hit_limit = True
             if not hit_limit:
                 break
-            contents.append({"role": "model", "parts": [{"text": buffered}]})
-            contents.append({"role": "user", "parts": [{"text": _CONTINUATION_MSG}]})
+            self._add_continuation_turn_gemini(contents, buffered)
 
 
 # ─────────────────────────────────────────────
