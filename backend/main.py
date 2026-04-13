@@ -3,8 +3,10 @@ CourseGen AI — Backend FastAPI
 Système de génération automatique de cours académiques par IA.
 """
 
+import asyncio
 import json
 import os
+import re
 import time
 import unicodedata
 from contextlib import asynccontextmanager
@@ -12,11 +14,14 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from enum import Enum
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from ai_engines import get_engine
@@ -28,6 +33,7 @@ from database import (
     generate_id,
     get_db,
     init_db,
+    migrate_db_schema,
     migrate_from_json,
 )
 from prompt_builder import (
@@ -52,8 +58,31 @@ COURS_DIR.mkdir(exist_ok=True)
 
 
 def _slugify(text: str) -> str:
-    """Remplace les espaces par des tirets, conserve accents et caractères spéciaux."""
-    return text.strip().replace(" ", "-")
+    """Remplace les espaces par des tirets et retire les caractères dangereux pour les noms de fichiers."""
+    text = text.strip()
+    # Retire les caractères interdits sur Windows/Unix et les séquences de traversée de chemin
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', text)
+    text = text.replace(' ', '-')
+    return text or 'sans-titre'
+
+
+def _check_api_keys() -> None:
+    """Vérifie les clés API au démarrage et logue des avertissements si manquantes."""
+    checks = [
+        ("MISTRAL_API_KEY",    "votre_cle_mistral_ici"),
+        ("ANTHROPIC_API_KEY",  "votre_cle_anthropic_ici"),
+        ("GROQ_API_KEY",       "votre_cle_groq_ici"),
+        ("GOOGLE_API_KEY",     "votre_cle_google_ici"),
+    ]
+    configured = 0
+    for env_var, placeholder in checks:
+        val = os.getenv(env_var, "")
+        if not val or val == placeholder or len(val) < 8:
+            print(f"[CONFIG] ⚠️  {env_var} non configurée — moteur correspondant indisponible.")
+        else:
+            configured += 1
+    if configured == 0:
+        print("[CONFIG] ❌  Aucun moteur IA configuré ! Ajoutez au moins une clé API dans .env")
 
 
 def build_course_filename(specialite: str, niveau: str, module: str, chapitre: str) -> str:
@@ -78,13 +107,17 @@ def save_course(specialite: str, niveau: str, module: str, chapitre: str, conten
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    migrate_from_json(Path(__file__).parent / "historique.json")
+    migrate_db_schema()
+    await asyncio.to_thread(migrate_from_json, Path(__file__).parent / "historique.json")
+    _check_api_keys()
     yield
 
 
 # ─────────────────────────────────────────────
 # Application
 # ─────────────────────────────────────────────
+
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="CourseGen AI",
@@ -93,12 +126,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS : l'URL du frontend est obligatoire en production ; fallback localhost en dev
+_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+_allowed_origins = list({_frontend_url, "http://localhost:5173", "http://localhost:3000"})
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:5173"),
-        "http://localhost:3000",
-    ],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -217,22 +253,28 @@ async def health_check():
     return {"status": "ok", "service": "CourseGen AI", "version": "1.1.0"}
 
 
+_specialites_cache: dict | None = None
+
+
 @app.get("/specialites")
 async def get_specialites():
-    """Retourne la liste des spécialités et leurs niveaux depuis specialites.json."""
-    try:
-        data = json.loads(SPECIALITES_FILE.read_text(encoding="utf-8"))
-        return data
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Fichier specialites.json introuvable.")
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"specialites.json invalide : {e}")
+    """Retourne la liste des spécialités et leurs niveaux depuis specialites.json (mis en cache)."""
+    global _specialites_cache
+    if _specialites_cache is None:
+        try:
+            _specialites_cache = json.loads(SPECIALITES_FILE.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Fichier specialites.json introuvable.")
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=500, detail=f"specialites.json invalide : {e}")
+    return _specialites_cache
 
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate_course(request: GenerateRequest, db: Session = Depends(get_db)):
-    engine = get_engine(request.moteur.value)
-    system_prompt, user_message = _build_prompts(request)
+@limiter.limit("15/minute")
+async def generate_course(request: Request, body: GenerateRequest, db: Session = Depends(get_db)):
+    engine = get_engine(body.moteur.value)
+    system_prompt, user_message = _build_prompts(body)
     start_time = time.time()
 
     try:
@@ -240,20 +282,20 @@ async def generate_course(request: GenerateRequest, db: Session = Depends(get_db
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Erreur API {request.moteur.value} : {e}")
+        raise HTTPException(status_code=502, detail=f"Erreur API {body.moteur.value} : {e}")
 
     if not contenu or not contenu.strip():
         raise HTTPException(status_code=500, detail="Le moteur IA n'a retourné aucun contenu.")
 
-    save_course(request.specialite, request.niveau, request.module, request.chapitre, contenu)
+    save_course(body.specialite, body.niveau, body.module, body.chapitre, contenu)
 
     db.add(HistoriqueEntry(
         id=generate_id(),
         date=datetime.now(),
-        specialite=request.specialite,
-        niveau=request.niveau,
-        module=request.module,
-        chapitre=request.chapitre,
+        specialite=body.specialite,
+        niveau=body.niveau,
+        module=body.module,
+        chapitre=body.chapitre,
         moteur=engine.label,
         duree_secondes=round(time.time() - start_time, 1),
     ))
@@ -263,9 +305,10 @@ async def generate_course(request: GenerateRequest, db: Session = Depends(get_db
 
 
 @app.post("/generate/stream")
-async def generate_course_stream(request: GenerateRequest):
-    engine = get_engine(request.moteur.value)
-    system_prompt, user_message = _build_prompts(request)
+@limiter.limit("10/minute")
+async def generate_course_stream(request: Request, body: GenerateRequest):
+    engine = get_engine(body.moteur.value)
+    system_prompt, user_message = _build_prompts(body)
     start_time = time.time()
 
     async def event_stream():
@@ -276,15 +319,15 @@ async def generate_course_stream(request: GenerateRequest):
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
 
             contenu_complet = "".join(full_content)
-            save_course(request.specialite, request.niveau, request.module, request.chapitre, contenu_complet)
+            save_course(body.specialite, body.niveau, body.module, body.chapitre, contenu_complet)
 
             add_history_entry(HistoriqueEntry(
                 id=generate_id(),
                 date=datetime.now(),
-                specialite=request.specialite,
-                niveau=request.niveau,
-                module=request.module,
-                chapitre=request.chapitre,
+                specialite=body.specialite,
+                niveau=body.niveau,
+                module=body.module,
+                chapitre=body.chapitre,
                 moteur=engine.label,
                 duree_secondes=round(time.time() - start_time, 1),
             ))
@@ -294,7 +337,7 @@ async def generate_course_stream(request: GenerateRequest):
         except ValueError as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'error': f'Erreur API {request.moteur.value} : {e}'})}\n\n"
+            yield f"data: {json.dumps({'error': f'Erreur API {body.moteur.value} : {e}'})}\n\n"
 
     return StreamingResponse(
         event_stream(),
@@ -367,16 +410,17 @@ async def _fetch_unsplash_image(query: str) -> tuple:
 
 
 @app.post("/generate-pptx")
-async def generate_pptx(request: PptxRequest):
-    image_bytes, photographer = await _fetch_unsplash_image(f"{request.specialite} {request.chapitre}")
+@limiter.limit("20/minute")
+async def generate_pptx(request: Request, body: PptxRequest):
+    image_bytes, photographer = await _fetch_unsplash_image(f"{body.specialite} {body.chapitre}")
 
     try:
         pptx_bytes = markdown_to_pptx(
-            contenu=request.contenu,
-            specialite=request.specialite,
-            module=request.module,
-            chapitre=request.chapitre,
-            niveau=request.niveau,
+            contenu=body.contenu,
+            specialite=body.specialite,
+            module=body.module,
+            chapitre=body.chapitre,
+            niveau=body.niveau,
             title_image=image_bytes,
             photographer=photographer or "",
         )
@@ -384,7 +428,7 @@ async def generate_pptx(request: PptxRequest):
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint : {e}")
 
     # Nom de fichier : Spécialité-Niveau-Module-Chapitre.pptx
-    parts = [request.specialite, request.niveau, request.module, request.chapitre]
+    parts = [body.specialite, body.niveau, body.module, body.chapitre]
     filename = "-".join(_slugify(p) for p in parts if p) + ".pptx"
     return StreamingResponse(
         iter([pptx_bytes]),
@@ -394,19 +438,20 @@ async def generate_pptx(request: PptxRequest):
 
 
 @app.post("/generate-quiz", response_model=QuizResponse)
-async def generate_quiz(request: QuizRequest):
-    engine = get_engine(request.moteur.value)
+@limiter.limit("20/minute")
+async def generate_quiz(request: Request, body: QuizRequest):
+    engine = get_engine(body.moteur.value)
     system_prompt = build_quiz_prompt(
-        specialite=request.specialite,
-        niveau=request.niveau,
-        module=request.module,
-        chapitre=request.chapitre,
+        specialite=body.specialite,
+        niveau=body.niveau,
+        module=body.module,
+        chapitre=body.chapitre,
     )
     user_message = build_quiz_user_message(
-        specialite=request.specialite,
-        niveau=request.niveau,
-        module=request.module,
-        chapitre=request.chapitre,
+        specialite=body.specialite,
+        niveau=body.niveau,
+        module=body.module,
+        chapitre=body.chapitre,
     )
 
     try:
@@ -414,7 +459,7 @@ async def generate_quiz(request: QuizRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Erreur API {request.moteur.value} : {e}")
+        raise HTTPException(status_code=502, detail=f"Erreur API {body.moteur.value} : {e}")
 
     if not contenu_gift or not contenu_gift.strip():
         raise HTTPException(status_code=500, detail="Le moteur IA n'a retourné aucun contenu.")
@@ -504,42 +549,51 @@ async def list_v2_agents():
     }
 
 
+_PIPELINE_TIMEOUT = 300  # 5 minutes max pour l'ensemble du pipeline
+
+
 @app.post("/generate-v2/stream")
-async def generate_v2_stream(request: GenerateV2Request):
+@limiter.limit("5/minute")
+async def generate_v2_stream(request: Request, body: GenerateV2Request):
     """
     Pipeline multi-agents V2 : 4 agents séquentiels avec SSE.
     Supporte la reprise depuis un agent échoué via resume_from + previous_results.
+    Timeout global : 5 minutes.
     """
     async def event_stream():
         try:
-            async for event in run_pipeline_cours(
-                specialite=request.specialite,
-                niveau=request.niveau,
-                module=request.module,
-                chapitre=request.chapitre,
-                resume_from=request.resume_from,
-                previous_results=request.previous_results,
-            ):
-                # Sauvegarde historique + fichier MD quand le pipeline se termine
-                if event.get("event") == "pipeline_complete":
-                    contenu_md = event.get("contenu_final_markdown", "")
-                    if contenu_md:
-                        save_course(
-                            request.specialite, request.niveau,
-                            request.module, request.chapitre, contenu_md,
-                        )
-                    add_history_entry(HistoriqueEntry(
-                        id=generate_id(),
-                        date=datetime.now(),
-                        specialite=request.specialite,
-                        niveau=request.niveau,
-                        module=request.module,
-                        chapitre=request.chapitre,
-                        moteur="Pipeline Multi-Agents V2",
-                        duree_secondes=event.get("duration_total", 0.0),
-                    ))
+            async with asyncio.timeout(_PIPELINE_TIMEOUT):
+                async for event in run_pipeline_cours(
+                    specialite=body.specialite,
+                    niveau=body.niveau,
+                    module=body.module,
+                    chapitre=body.chapitre,
+                    resume_from=body.resume_from,
+                    previous_results=body.previous_results,
+                ):
+                    # Sauvegarde historique + fichier MD quand le pipeline se termine
+                    if event.get("event") == "pipeline_complete":
+                        contenu_md = event.get("contenu_final_markdown", "")
+                        if contenu_md:
+                            save_course(
+                                body.specialite, body.niveau,
+                                body.module, body.chapitre, contenu_md,
+                            )
+                        add_history_entry(HistoriqueEntry(
+                            id=generate_id(),
+                            date=datetime.now(),
+                            specialite=body.specialite,
+                            niveau=body.niveau,
+                            module=body.module,
+                            chapitre=body.chapitre,
+                            moteur="Pipeline Multi-Agents V2",
+                            duree_secondes=event.get("duration_total", 0.0),
+                            is_pipeline_v2=True,
+                        ))
 
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'event': 'fatal_error', 'error': f'Timeout global du pipeline ({_PIPELINE_TIMEOUT}s). Réessayez ou relancez depuis l\\'agent échoué.'}, ensure_ascii=False)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)}, ensure_ascii=False)}\n\n"
 
@@ -555,16 +609,17 @@ async def generate_v2_stream(request: GenerateV2Request):
 
 
 @app.post("/generate-v2/quiz/stream")
-async def generate_v2_quiz_stream(request: GenerateV2QuizRequest):
+@limiter.limit("20/minute")
+async def generate_v2_quiz_stream(request: Request, body: GenerateV2QuizRequest):
     """Agent Quiz V2 — génère un quiz GIFT à partir du cours produit par le pipeline."""
     async def event_stream():
         try:
             async for event in run_agent_quiz(
-                specialite=request.specialite,
-                niveau=request.niveau,
-                module=request.module,
-                chapitre=request.chapitre,
-                contenu_markdown=request.contenu_markdown,
+                specialite=body.specialite,
+                niveau=body.niveau,
+                module=body.module,
+                chapitre=body.chapitre,
+                contenu_markdown=body.contenu_markdown,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:

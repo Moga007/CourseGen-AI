@@ -13,16 +13,20 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
     const [filterMoteur, setFilterMoteur]         = useState('')
     const [filterOptions, setFilterOptions]       = useState({ specialites: [], moteurs: [] })
     const [isLoading, setIsLoading]     = useState(true)
+    const [loadError, setLoadError]     = useState(null)
 
     // Charge les options de filtre une seule fois
     useEffect(() => {
         axios.get(`${API_URL}/historique/meta`)
             .then(r => setFilterOptions(r.data))
-            .catch(() => {})
+            .catch(() => {
+                // Non bloquant — les filtres resteront vides mais l'historique peut quand même s'afficher
+            })
     }, [])
 
     const fetchPage = useCallback(async (p, specialite, moteur) => {
         setIsLoading(true)
+        setLoadError(null)
         try {
             const params = { page: p, limit: PER_PAGE }
             if (specialite) params.specialite = specialite
@@ -32,7 +36,7 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
             setTotal(r.data.total)
             setPages(r.data.pages)
         } catch {
-            // Silencieux — non critique
+            setLoadError('Impossible de charger l\'historique. Vérifiez que le backend est lancé.')
         } finally {
             setIsLoading(false)
         }
@@ -55,7 +59,7 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
         })
     }
 
-    const isV2Entry = (entry) => entry.moteur === 'Pipeline Multi-Agents V2'
+    const isV2Entry = (entry) => entry.is_pipeline_v2 === true
 
     const handleReplay = (entry) => {
         let moteur = 'mistral'
@@ -82,7 +86,7 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
         return { bg: 'rgba(99,102,241,0.1)', fg: 'var(--accent-primary-light)' }
     }
 
-    if (!isLoading && total === 0 && !filterSpecialite && !filterMoteur) return null
+    if (!isLoading && !loadError && total === 0 && !filterSpecialite && !filterMoteur) return null
 
     const selectStyle = {
         background:   'var(--bg-input)',
@@ -170,6 +174,32 @@ export default function HistorySection({ onReplay, refreshKey = 0 }) {
                     </button>
                 )}
             </div>
+
+            {/* Erreur de chargement */}
+            {loadError && (
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '12px 16px', borderRadius: '8px', marginBottom: '12px',
+                    background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+                    color: '#f87171', fontSize: '0.85rem',
+                }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                        <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span style={{ flex: 1 }}>{loadError}</span>
+                    <button
+                        onClick={() => fetchPage(page, filterSpecialite, filterMoteur)}
+                        style={{
+                            background: 'transparent', border: '1px solid rgba(248,113,113,0.5)',
+                            borderRadius: '6px', padding: '4px 10px', color: '#f87171',
+                            fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                            whiteSpace: 'nowrap',
+                        }}
+                    >
+                        Réessayer
+                    </button>
+                </div>
+            )}
 
             {/* Table */}
             {isLoading ? (
