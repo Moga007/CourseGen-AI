@@ -2,31 +2,213 @@
   {
     "value": "GFC",
     "label": "GFC — Gestion, Finance et Comptabilité",
-    "niveaux": ["B1", "B2", "B3", "M1", "M2"]
+    "niveaux": ["B1", "B2", "B3", "M1", "M2"],
+    "modules": {
+      "B1": [
+        { "code": "CGE-B1-M1", "nom": "Introduction à la Comptabilité",       "semestre": "S1", "heures": 50 },
+        { "code": "CGE-B1-M2", "nom": "Économie d'Entreprise",                 "semestre": "S1", "heures": 40 },
+        { "code": "CGE-B1-M3", "nom": "Mathématiques de Gestion",              "semestre": "S1", "heures": 40 },
+        { "code": "CGE-B1-M4", "nom": "Outils Bureautiques",                   "semestre": "S1", "heures": 40 },
+        { "code": "CGE-B1-M5", "nom": "Communication Professionnelle",         "semestre": "S2", "heures": 35 },
+        { "code": "CGE-B1-M6", "nom": "Introduction au Droit",                 "semestre": "S2", "heures": 35 },
+        { "code": "CGE-B1-M7", "nom": "Anglais Professionnel",                 "semestre": "S2", "heures": 35 },
+        { "code": "CGE-B1-M8", "nom": "Projet Professionnel et Stage",         "semestre": "S2", "heures": 45 }
+      ],
+      "B2": [
+        { "code": "CGE-B2-M1", "nom": "Comptabilité Approfondie",              "semestre": "S3", "heures": 50 },
+        { "code": "CGE-B2-M2", "nom": "Fiscalité d'Entreprise - Initiation",   "semestre": "S3", "heures": 40 },
+        { "code": "CGE-B2-M3", "nom": "Contrôle de Gestion - Initiation",      "semestre": "S3", "heures": 40 },
+        { "code": "CGE-B2-M4", "nom": "Droit des Sociétés",                    "semestre": "S3", "heures": 40 },
+        { "code": "CGE-B2-M5", "nom": "Analyse Financière - Initiation",       "semestre": "S4", "heures": 40 },
+        { "code": "CGE-B2-M6", "nom": "Informatique de Gestion",               "semestre": "S4", "heures": 35 },
+        { "code": "CGE-B2-M7", "nom": "Management et Organisation",            "semestre": "S4", "heures": 35 },
+        { "code": "CGE-B2-M8", "nom": "Stage et Projet",                       "semestre": "S4", "heures": 40 }
+      ],
+      "B3": [
+        { "code": "CGE-B3-M1", "nom": "Comptabilité des Sociétés",             "semestre": "S5", "heures": 50 },
+        { "code": "CGE-B3-M2", "nom": "Fiscalité Approfondie",                 "semestre": "S5", "heures": 45 },
+        { "code": "CGE-B3-M3", "nom": "Contrôle de Gestion Approfondi",        "semestre": "S5", "heures": 45 },
+        { "code": "CGE-B3-M4", "nom": "Audit et Contrôle Interne",             "semestre": "S5", "heures": 40 },
+        { "code": "CGE-B3-M5", "nom": "Analyse Financière Approfondie",        "semestre": "S6", "heures": 40 },
+        { "code": "CGE-B3-M6", "nom": "Consolidation et Normes IFRS",          "semestre": "S6", "heures": 35 },
+        { "code": "CGE-B3-M7", "nom": "Systèmes d'Information Comptable",      "semestre": "S6", "heures": 35 },
+        { "code": "CGE-B3-M8", "nom": "Stage et Mémoire",                      "semestre": "S6", "heures": 45 }
+      ],
+      "M1": [
+        { "code": "GCF-M1-M1", "nom": "Finance d'Entreprise",                  "semestre": "S7", "heures": 50 },
+        { "code": "GCF-M1-M2", "nom": "Contrôle de Gestion Stratégique",       "semestre": "S7", "heures": 45 },
+        { "code": "GCF-M1-M3", "nom": "Audit Financier",                       "semestre": "S7", "heures": 45 },
+        { "code": "GCF-M1-M4", "nom": "Droit Fiscal Avancé",                   "semestre": "S7", "heures": 40 },
+        { "code": "GCF-M1-M5", "nom": "Reporting et Consolidation",            "semestre": "S8", "heures": 40 },
+        { "code": "GCF-M1-M6", "nom": "Management de la Performance",          "semestre": "S8", "heures": 35 },
+        { "code": "GCF-M1-M7", "nom": "Systèmes d'Information Financiers",     "semestre": "S8", "heures": 35 },
+        { "code": "GCF-M1-M8", "nom": "Projet Professionnel et Stage",         "semestre": "S8", "heures": 40 }
+      ],
+      "M2": [
+        { "code": "GCF-M2-M1", "nom": "Stratégie Financière",                  "semestre": "S9",  "heures": 45 },
+        { "code": "GCF-M2-M2", "nom": "Ingénierie Financière",                 "semestre": "S9",  "heures": 45 },
+        { "code": "GCF-M2-M3", "nom": "Gouvernance et Éthique",                "semestre": "S9",  "heures": 35 },
+        { "code": "GCF-M2-M4", "nom": "Management des Risques",                "semestre": "S9",  "heures": 40 },
+        { "code": "GCF-M2-M5", "nom": "Fusion-Acquisition et LBO",             "semestre": "S10", "heures": 40 },
+        { "code": "GCF-M2-M6", "nom": "Finance Internationale",                "semestre": "S10", "heures": 35 },
+        { "code": "GCF-M2-M7", "nom": "Leadership et Management",              "semestre": "S10", "heures": 35 },
+        { "code": "GCF-M2-M8", "nom": "Mémoire Professionnel",                 "semestre": "S10", "heures": 50 }
+      ]
+    }
   },
   {
     "value": "RH",
     "label": "RH — Ressources Humaines et Management",
-    "niveaux": ["B1", "B2", "B3", "M1", "M2"]
+    "niveaux": ["B1", "B2", "B3", "M1", "M2"],
+    "modules": {
+      "B1": [
+        { "code": "ARH-B1-M1", "nom": "Introduction aux Ressources Humaines",       "semestre": "S1", "heures": 50 },
+        { "code": "ARH-B1-M2", "nom": "Droit du Travail - Initiation",              "semestre": "S1", "heures": 40 },
+        { "code": "ARH-B1-M3", "nom": "Communication Professionnelle",              "semestre": "S1", "heures": 40 },
+        { "code": "ARH-B1-M4", "nom": "Outils Bureautiques",                        "semestre": "S1", "heures": 40 },
+        { "code": "ARH-B1-M5", "nom": "Organisation et Fonctionnement de l'Entreprise", "semestre": "S2", "heures": 35 },
+        { "code": "ARH-B1-M6", "nom": "Anglais Professionnel - Initiation",         "semestre": "S2", "heures": 35 },
+        { "code": "ARH-B1-M7", "nom": "Développement Personnel et Soft Skills",     "semestre": "S2", "heures": 35 },
+        { "code": "ARH-B1-M8", "nom": "Projet Professionnel et Stage",              "semestre": "S2", "heures": 45 }
+      ],
+      "B2": [
+        { "code": "ARH-B2-M1", "nom": "Administration du Personnel",                "semestre": "S3", "heures": 50 },
+        { "code": "ARH-B2-M2", "nom": "Droit du Travail Approfondi",                "semestre": "S3", "heures": 45 },
+        { "code": "ARH-B2-M3", "nom": "Recrutement et Intégration",                 "semestre": "S3", "heures": 40 },
+        { "code": "ARH-B2-M4", "nom": "Paie et Déclarations Sociales",              "semestre": "S3", "heures": 45 },
+        { "code": "ARH-B2-M5", "nom": "Formation et Développement",                 "semestre": "S4", "heures": 35 },
+        { "code": "ARH-B2-M6", "nom": "SIRH - Initiation",                          "semestre": "S4", "heures": 35 },
+        { "code": "ARH-B2-M7", "nom": "Communication Interne",                      "semestre": "S4", "heures": 30 },
+        { "code": "ARH-B2-M8", "nom": "Stage et Projet RH",                         "semestre": "S4", "heures": 40 }
+      ],
+      "B3": [
+        { "code": "ARH-B3-M1", "nom": "Gestion des Compétences et GPEC",            "semestre": "S5", "heures": 45 },
+        { "code": "ARH-B3-M2", "nom": "Relations Sociales et CSE",                  "semestre": "S5", "heures": 45 },
+        { "code": "ARH-B3-M3", "nom": "Politique de Rémunération",                  "semestre": "S5", "heures": 40 },
+        { "code": "ARH-B3-M4", "nom": "Marque Employeur et Recrutement Digital",    "semestre": "S5", "heures": 40 },
+        { "code": "ARH-B3-M5", "nom": "SIRH et Digitalisation RH",                  "semestre": "S6", "heures": 40 },
+        { "code": "ARH-B3-M6", "nom": "Qualité de Vie au Travail",                  "semestre": "S6", "heures": 35 },
+        { "code": "ARH-B3-M7", "nom": "Gestion de Projet RH",                       "semestre": "S6", "heures": 35 },
+        { "code": "ARH-B3-M8", "nom": "Stage et Mémoire",                           "semestre": "S6", "heures": 45 }
+      ],
+      "M1": [
+        { "code": "GRH-M1-M1", "nom": "Pilotage du Recrutement",                    "semestre": "S7", "heures": 45 },
+        { "code": "GRH-M1-M2", "nom": "Droit du Travail Avancé",                    "semestre": "S7", "heures": 45 },
+        { "code": "GRH-M1-M3", "nom": "Gestion de la Paie et Charges Sociales",     "semestre": "S7", "heures": 45 },
+        { "code": "GRH-M1-M4", "nom": "Développement des Compétences",              "semestre": "S7", "heures": 40 },
+        { "code": "GRH-M1-M5", "nom": "SIRH et Reporting RH",                       "semestre": "S8", "heures": 35 },
+        { "code": "GRH-M1-M6", "nom": "Relations Sociales et Communication Interne", "semestre": "S8", "heures": 35 },
+        { "code": "GRH-M1-M7", "nom": "Management d'Équipe",                        "semestre": "S8", "heures": 35 },
+        { "code": "GRH-M1-M8", "nom": "Projet Professionnel et Stage",              "semestre": "S8", "heures": 40 }
+      ],
+      "M2": [
+        { "code": "GRH-M2-M1", "nom": "Management Stratégique RH",                  "semestre": "S9",  "heures": 45 },
+        { "code": "GRH-M2-M2", "nom": "Négociation et Dialogue Social",             "semestre": "S9",  "heures": 40 },
+        { "code": "GRH-M2-M3", "nom": "Conduite du Changement",                     "semestre": "S9",  "heures": 40 },
+        { "code": "GRH-M2-M4", "nom": "Gestion des Talents et GEPP",                "semestre": "S9",  "heures": 40 },
+        { "code": "GRH-M2-M5", "nom": "Digitalisation et People Analytics",         "semestre": "S10", "heures": 35 },
+        { "code": "GRH-M2-M6", "nom": "QVT et RSE",                                 "semestre": "S10", "heures": 35 },
+        { "code": "GRH-M2-M7", "nom": "Leadership et Coaching",                     "semestre": "S10", "heures": 35 },
+        { "code": "GRH-M2-M8", "nom": "Mémoire Professionnel",                      "semestre": "S10", "heures": 50 }
+      ]
+    }
   },
   {
     "value": "IWA",
     "label": "IWA — Informatique Web et Applicatif",
-    "niveaux": ["B1", "B2", "B3"]
+    "niveaux": ["B1", "B2", "B3"],
+    "modules": {
+      "B1": [
+        { "code": "IWA-B1-M1", "nom": "Fondamentaux du Web et d'Internet",          "semestre": "S1", "heures": 50 },
+        { "code": "IWA-B1-M2", "nom": "HTML5 - Structurer une Page Web",            "semestre": "S1", "heures": 40 },
+        { "code": "IWA-B1-M3", "nom": "CSS3 - Styliser une Page Web",               "semestre": "S1", "heures": 40 },
+        { "code": "IWA-B1-M4", "nom": "Initiation à la Programmation",              "semestre": "S1", "heures": 40 },
+        { "code": "IWA-B1-M5", "nom": "JavaScript - Premiers Pas",                  "semestre": "S2", "heures": 40 },
+        { "code": "IWA-B1-M6", "nom": "Introduction aux Bases de Données",          "semestre": "S2", "heures": 35 },
+        { "code": "IWA-B1-M7", "nom": "Outils Collaboratifs et Gestion de Version", "semestre": "S2", "heures": 30 },
+        { "code": "IWA-B1-M8", "nom": "Projet Web et Stage",                        "semestre": "S2", "heures": 45 }
+      ],
+      "B2": [
+        { "code": "IWA-B2-M1", "nom": "JavaScript Avancé",                          "semestre": "S3", "heures": 50 },
+        { "code": "IWA-B2-M2", "nom": "PHP et MySQL",                               "semestre": "S3", "heures": 45 },
+        { "code": "IWA-B2-M3", "nom": "Frameworks CSS (Bootstrap/Tailwind)",        "semestre": "S3", "heures": 35 },
+        { "code": "IWA-B2-M4", "nom": "UX/UI Design",                               "semestre": "S3", "heures": 40 },
+        { "code": "IWA-B2-M5", "nom": "API REST et Services Web",                   "semestre": "S4", "heures": 40 },
+        { "code": "IWA-B2-M6", "nom": "Introduction à React",                       "semestre": "S4", "heures": 40 },
+        { "code": "IWA-B2-M7", "nom": "Sécurité Web",                               "semestre": "S4", "heures": 30 },
+        { "code": "IWA-B2-M8", "nom": "Projet Full-Stack",                          "semestre": "S4", "heures": 45 }
+      ],
+      "B3": [
+        { "code": "IWA-B3-M1", "nom": "Développement Backend Avancé",               "semestre": "S5", "heures": 50 },
+        { "code": "IWA-B3-M2", "nom": "React et Écosystème",                        "semestre": "S5", "heures": 45 },
+        { "code": "IWA-B3-M3", "nom": "DevOps et CI/CD",                            "semestre": "S5", "heures": 40 },
+        { "code": "IWA-B3-M4", "nom": "Architecture Logicielle",                    "semestre": "S5", "heures": 40 },
+        { "code": "IWA-B3-M5", "nom": "Cloud Computing",                            "semestre": "S6", "heures": 40 },
+        { "code": "IWA-B3-M6", "nom": "Tests et Qualité Logicielle",                "semestre": "S6", "heures": 35 },
+        { "code": "IWA-B3-M7", "nom": "Gestion de Projet Agile",                    "semestre": "S6", "heures": 35 },
+        { "code": "IWA-B3-M8", "nom": "Stage et Portfolio",                         "semestre": "S6", "heures": 45 }
+      ]
+    }
   },
   {
     "value": "DIA",
     "label": "DIA — Data Science et Intelligence Artificielle",
-    "niveaux": ["B1", "B2", "B3", "M1", "M2"]
+    "niveaux": ["B3"],
+    "modules": {
+      "B3": [
+        { "code": "DSIA-B3-M1", "nom": "Python pour la Data Science",               "semestre": "S5", "heures": 50 },
+        { "code": "DSIA-B3-M2", "nom": "Statistiques et Probabilités",              "semestre": "S5", "heures": 45 },
+        { "code": "DSIA-B3-M3", "nom": "Bases de Données et SQL Avancé",            "semestre": "S5", "heures": 40 },
+        { "code": "DSIA-B3-M4", "nom": "Visualisation de Données",                  "semestre": "S5", "heures": 35 },
+        { "code": "DSIA-B3-M5", "nom": "Machine Learning",                          "semestre": "S6", "heures": 45 },
+        { "code": "DSIA-B3-M6", "nom": "Big Data et Cloud",                         "semestre": "S6", "heures": 40 },
+        { "code": "DSIA-B3-M7", "nom": "IA et Deep Learning",                       "semestre": "S6", "heures": 40 },
+        { "code": "DSIA-B3-M8", "nom": "Projet Data Science",                       "semestre": "S6", "heures": 45 }
+      ]
+    }
   },
   {
     "value": "MCD",
     "label": "MCD — Marketing et Communication Digitale",
-    "niveaux": ["B1", "B2", "B3"]
+    "niveaux": ["B3"],
+    "modules": {
+      "B3": [
+        { "code": "MCD-B3-M1", "nom": "Stratégie Digitale et Marketing",            "semestre": "S5", "heures": 50 },
+        { "code": "MCD-B3-M2", "nom": "Content Marketing et Storytelling",          "semestre": "S5", "heures": 40 },
+        { "code": "MCD-B3-M3", "nom": "Réseaux Sociaux et Community Management",    "semestre": "S5", "heures": 45 },
+        { "code": "MCD-B3-M4", "nom": "SEO et Référencement",                       "semestre": "S5", "heures": 40 },
+        { "code": "MCD-B3-M5", "nom": "Publicité Digitale (SEA, Social Ads)",       "semestre": "S6", "heures": 40 },
+        { "code": "MCD-B3-M6", "nom": "Analytics et Data Marketing",                "semestre": "S6", "heures": 35 },
+        { "code": "MCD-B3-M7", "nom": "E-commerce et CRM",                          "semestre": "S6", "heures": 35 },
+        { "code": "MCD-B3-M8", "nom": "Projet de Campagne Digitale",                "semestre": "S6", "heures": 45 }
+      ]
+    }
   },
   {
     "value": "GPE",
     "label": "GPE — Gestion, Projet et Entrepreneuriat",
-    "niveaux": ["M1", "M2"]
+    "niveaux": ["M1", "M2"],
+    "modules": {
+      "M1": [
+        { "code": "GPE-M1-M1", "nom": "Fondamentaux du Management",                 "semestre": "S7", "heures": 45 },
+        { "code": "GPE-M1-M2", "nom": "Gestion de Projet (Cascade et Agile)",       "semestre": "S7", "heures": 50 },
+        { "code": "GPE-M1-M3", "nom": "Finance pour Managers",                      "semestre": "S7", "heures": 40 },
+        { "code": "GPE-M1-M4", "nom": "Marketing et Développement Commercial",      "semestre": "S7", "heures": 40 },
+        { "code": "GPE-M1-M5", "nom": "Entrepreneuriat et Business Model",          "semestre": "S8", "heures": 40 },
+        { "code": "GPE-M1-M6", "nom": "Droit des Affaires",                         "semestre": "S8", "heures": 35 },
+        { "code": "GPE-M1-M7", "nom": "Outils Numériques pour le Projet",           "semestre": "S8", "heures": 35 },
+        { "code": "GPE-M1-M8", "nom": "Projet Fil Rouge et Stage",                  "semestre": "S8", "heures": 40 }
+      ],
+      "M2": [
+        { "code": "GPE-M2-M1", "nom": "Stratégie d'Entreprise",                     "semestre": "S9",  "heures": 45 },
+        { "code": "GPE-M2-M2", "nom": "Leadership et Management d'Équipe",          "semestre": "S9",  "heures": 40 },
+        { "code": "GPE-M2-M3", "nom": "Innovation et Design Thinking",              "semestre": "S9",  "heures": 40 },
+        { "code": "GPE-M2-M4", "nom": "Négociation et Gestion des Conflits",        "semestre": "S9",  "heures": 35 },
+        { "code": "GPE-M2-M5", "nom": "Création et Reprise d'Entreprise",           "semestre": "S10", "heures": 40 },
+        { "code": "GPE-M2-M6", "nom": "Transformation Digitale",                    "semestre": "S10", "heures": 35 },
+        { "code": "GPE-M2-M7", "nom": "International Business",                     "semestre": "S10", "heures": 35 },
+        { "code": "GPE-M2-M8", "nom": "Mémoire Professionnel",                      "semestre": "S10", "heures": 50 }
+      ]
+    }
   }
 ]

@@ -401,6 +401,10 @@ async def run_pipeline_cours(
     niveau: str,
     module: str,
     chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
     resume_from: str | None = None,
     previous_results: dict | None = None,
 ) -> AsyncIterator[dict]:
@@ -423,6 +427,14 @@ async def run_pipeline_cours(
         build_agent_qualite_system,     build_agent_qualite_user,
     )
 
+    # Métadonnées catalogue propagées à tous les agents
+    meta_kwargs = dict(
+        code_moodle=code_moodle,
+        semestre=semestre,
+        heures=heures,
+        numero_chapitre=numero_chapitre,
+    )
+
     ctx: dict[str, dict] = dict(previous_results or {})
     pipeline_start = time.time()
 
@@ -443,12 +455,16 @@ async def run_pipeline_cours(
         # ── Construction des prompts selon l'agent ──────────────────────────
         if agent_config.name == "pedagogique":
             sys_p = build_agent_pedagogique_system()
-            usr_p = build_agent_pedagogique_user(specialite, niveau, module, chapitre)
+            usr_p = build_agent_pedagogique_user(
+                specialite, niveau, module, chapitre, **meta_kwargs
+            )
 
         elif agent_config.name == "redacteur":
             plan_json = json.dumps(ctx["pedagogique"], ensure_ascii=False, indent=2)
             sys_p = build_agent_redacteur_system()
-            usr_p = build_agent_redacteur_user(specialite, niveau, module, chapitre, plan_json)
+            usr_p = build_agent_redacteur_user(
+                specialite, niveau, module, chapitre, plan_json, **meta_kwargs
+            )
 
         elif agent_config.name == "designer":
             # Passe le contenu rédigé mais allégé (sans les introductions de parties)
@@ -470,7 +486,9 @@ async def run_pipeline_cours(
             }
             contenu_json = json.dumps(contenu_leger, ensure_ascii=False, indent=2)
             sys_p = build_agent_designer_system()
-            usr_p = build_agent_designer_user(specialite, niveau, module, chapitre, contenu_json)
+            usr_p = build_agent_designer_user(
+                specialite, niveau, module, chapitre, contenu_json, **meta_kwargs
+            )
 
         elif agent_config.name == "qualite":
             plan_json = json.dumps(ctx["pedagogique"], ensure_ascii=False)
@@ -496,7 +514,8 @@ async def run_pipeline_cours(
             sys_p = build_agent_qualite_system()
             usr_p = build_agent_qualite_user(
                 specialite, niveau, module, chapitre,
-                plan_json, contenu_resume_json, slides_json
+                plan_json, contenu_resume_json, slides_json,
+                **meta_kwargs
             )
         else:
             continue
@@ -561,6 +580,10 @@ async def run_agent_quiz(
     module: str,
     chapitre: str,
     contenu_markdown: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
 ) -> AsyncIterator[dict]:
     """
     Pipeline Quiz : exécute l'Agent Quiz et génère des events SSE.
@@ -571,7 +594,11 @@ async def run_agent_quiz(
     yield {"event": "agent_start", "agent": "quiz", "label": AGENT_QUIZ.label}
 
     sys_p = build_agent_quiz_system()
-    usr_p = build_agent_quiz_user(specialite, niveau, module, chapitre, contenu_markdown)
+    usr_p = build_agent_quiz_user(
+        specialite, niveau, module, chapitre, contenu_markdown,
+        code_moodle=code_moodle, semestre=semestre,
+        heures=heures, numero_chapitre=numero_chapitre,
+    )
 
     result = await run_agent(AGENT_QUIZ, sys_p, usr_p)
 

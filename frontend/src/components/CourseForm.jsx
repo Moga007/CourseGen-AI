@@ -13,15 +13,22 @@ const NIVEAUX_LABELS = {
 }
 const NIVEAUX_GROUPE = { B1: 'Bachelor', B2: 'Bachelor', B3: 'Bachelor', M1: 'Master', M2: 'Master' }
 
+// Chaque cours comporte 12 chapitres (structure pédagogique IESIG)
+const NB_CHAPITRES_PAR_COURS = 12
+
 export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode, onToggleMode }) {
     const [specialites, setSpecialites]     = useState([])
     const [specialitesError, setSpecialitesError] = useState(false)
     const [formData, setFormData] = useState({
-        specialite: '',
-        niveau: '',
-        module: '',
-        chapitre: '',
-        moteur: 'mistral',
+        specialite:      '',
+        niveau:          '',
+        module:          '',
+        code_moodle:     '',
+        semestre:        '',
+        heures:          null,
+        numero_chapitre: 1,
+        chapitre:        '',
+        moteur:          'mistral',
     })
 
     // Chargement des spécialités depuis l'API au montage
@@ -35,6 +42,10 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
     const specialiteSelectionnee = specialites.find(s => s.value === formData.specialite)
     const niveauxDisponibles = specialiteSelectionnee ? specialiteSelectionnee.niveaux : []
 
+    // Modules disponibles pour (spécialité, niveau) — depuis specialites.json enrichi
+    const modulesDisponibles =
+        specialiteSelectionnee?.modules?.[formData.niveau] ?? []
+
     // Grouper les niveaux disponibles par Bachelor / Master
     const niveauxGroupes = ['Bachelor', 'Master'].map(groupe => ({
         groupe,
@@ -43,12 +54,54 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
 
     const handleChange = (e) => {
         const { name, value } = e.target
+
         if (name === 'specialite') {
             const spec = specialites.find(s => s.value === value)
-            setFormData({ ...formData, specialite: value, niveau: spec ? spec.niveaux[0] : '' })
-        } else {
-            setFormData({ ...formData, [name]: value })
+            // Reset niveau / module / métadonnées quand la spécialité change
+            setFormData({
+                ...formData,
+                specialite:  value,
+                niveau:      spec ? spec.niveaux[0] : '',
+                module:      '',
+                code_moodle: '',
+                semestre:    '',
+                heures:      null,
+            })
+            return
         }
+
+        if (name === 'niveau') {
+            // Reset module / métadonnées quand le niveau change
+            setFormData({
+                ...formData,
+                niveau:      value,
+                module:      '',
+                code_moodle: '',
+                semestre:    '',
+                heures:      null,
+            })
+            return
+        }
+
+        if (name === 'module') {
+            // value = code Moodle du module sélectionné
+            const mod = modulesDisponibles.find(m => m.code === value)
+            setFormData({
+                ...formData,
+                module:      mod ? mod.nom   : '',
+                code_moodle: mod ? mod.code  : '',
+                semestre:    mod ? mod.semestre : '',
+                heures:      mod ? mod.heures   : null,
+            })
+            return
+        }
+
+        if (name === 'numero_chapitre') {
+            setFormData({ ...formData, numero_chapitre: parseInt(value, 10) || 1 })
+            return
+        }
+
+        setFormData({ ...formData, [name]: value })
     }
 
     const handleSubmit = (e) => {
@@ -59,11 +112,24 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
     // Replay : remplir le formulaire quand initialData change
     useEffect(() => {
         if (initialData) {
-            setFormData(initialData)
+            // Rétro-compatibilité : si l'entrée n'a pas les nouveaux champs, on les initialise
+            setFormData({
+                numero_chapitre: 1,
+                code_moodle:     '',
+                semestre:        '',
+                heures:          null,
+                ...initialData,
+            })
         }
     }, [initialData])
 
-    const isFormValid = formData.specialite && formData.niveau && formData.module && formData.chapitre
+    const isFormValid =
+        formData.specialite &&
+        formData.niveau &&
+        formData.module &&
+        formData.numero_chapitre >= 1 &&
+        formData.numero_chapitre <= NB_CHAPITRES_PAR_COURS &&
+        formData.chapitre
 
     return (
         <form onSubmit={handleSubmit} className="glass-card p-6 sm:p-8 animate-fade-in-up-delay">
@@ -164,9 +230,13 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
                         value={formData.niveau}
                         onChange={handleChange}
                         disabled={!formData.specialite}
+                        required
                     >
                         {!formData.specialite && (
                             <option value="" disabled>Choisir d'abord une spécialité</option>
+                        )}
+                        {formData.specialite && !formData.niveau && (
+                            <option value="" disabled>Choisir un niveau…</option>
                         )}
                         {niveauxGroupes.map(g => (
                             <optgroup key={g.groupe} label={g.groupe}>
@@ -178,30 +248,64 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
                     </select>
                 </div>
 
-                {/* Module */}
-                <div>
+                {/* Module — dropdown (code Moodle en value, intitulé seul affiché) */}
+                <div className="sm:col-span-2">
                     <label htmlFor="module" className="form-label">Module</label>
-                    <input
-                        type="text"
+                    <select
                         id="module"
                         name="module"
-                        className="form-input"
-                        placeholder="Ex : Systèmes d'exploitation"
-                        value={formData.module}
+                        className="form-select"
+                        value={formData.code_moodle}
                         onChange={handleChange}
+                        disabled={!formData.niveau || modulesDisponibles.length === 0}
                         required
-                    />
+                    >
+                        <option value="" disabled>
+                            {!formData.specialite
+                                ? 'Choisir d\'abord une spécialité'
+                                : !formData.niveau
+                                    ? 'Choisir d\'abord un niveau'
+                                    : modulesDisponibles.length === 0
+                                        ? 'Aucun module disponible pour ce niveau'
+                                        : 'Choisir un module…'}
+                        </option>
+                        {modulesDisponibles.map(m => (
+                            <option key={m.code} value={m.code}>{m.nom}</option>
+                        ))}
+                    </select>
+                    {formData.code_moodle && (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            {formData.code_moodle} · {formData.semestre} · {formData.heures}h
+                        </p>
+                    )}
                 </div>
 
-                {/* Chapitre */}
+                {/* N° chapitre */}
                 <div>
-                    <label htmlFor="chapitre" className="form-label">Chapitre</label>
+                    <label htmlFor="numero_chapitre" className="form-label">N° du chapitre</label>
+                    <select
+                        id="numero_chapitre"
+                        name="numero_chapitre"
+                        className="form-select"
+                        value={formData.numero_chapitre}
+                        onChange={handleChange}
+                        required
+                    >
+                        {Array.from({ length: NB_CHAPITRES_PAR_COURS }, (_, i) => i + 1).map(n => (
+                            <option key={n} value={n}>Chapitre {n} / {NB_CHAPITRES_PAR_COURS}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Titre du chapitre */}
+                <div>
+                    <label htmlFor="chapitre" className="form-label">Titre du chapitre</label>
                     <input
                         type="text"
                         id="chapitre"
                         name="chapitre"
                         className="form-input"
-                        placeholder="Ex : Gestion de la mémoire"
+                        placeholder="Ex : Les amortissements"
                         value={formData.chapitre}
                         onChange={handleChange}
                         required

@@ -3,8 +3,22 @@ Prompts système des agents du pipeline multi-agents V2.
 Fonctions pures — aucun appel IA ici.
 Importe get_niveau_description depuis prompt_builder.py pour éviter la duplication.
 """
-from prompt_builder import get_niveau_description
+from prompt_builder import get_niveau_description, build_catalog_context, NB_CHAPITRES_PAR_COURS
 from agents_config import VALID_LAYOUTS
+
+
+def _chapitre_pos(numero_chapitre: int | None) -> str:
+    """Retourne ' (chapitre N/12)' ou '' selon disponibilité."""
+    return (
+        f" (chapitre {numero_chapitre}/{NB_CHAPITRES_PAR_COURS})"
+        if numero_chapitre else ""
+    )
+
+
+def _catalog_block(code_moodle, semestre, heures, numero_chapitre) -> str:
+    """Retourne un bloc de contexte catalogue préfixé d'une ligne vide, ou ''."""
+    ctx = build_catalog_context(code_moodle, semestre, heures, numero_chapitre)
+    return f"\n\n{ctx}" if ctx else ""
 
 
 # ── Agent 1 : Pédagogique ────────────────────────────────────────────────────
@@ -19,14 +33,20 @@ def build_agent_pedagogique_system() -> str:
 
 
 def build_agent_pedagogique_user(
-    specialite: str, niveau: str, module: str, chapitre: str
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
 ) -> str:
     niveau_desc = get_niveau_description(niveau)
+    pos = _chapitre_pos(numero_chapitre)
+    catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
     return f"""Génère un plan pédagogique JSON pour ce cours universitaire :
 - Spécialité : {specialite}
 - Niveau : {niveau} ({niveau_desc})
 - Module : {module}
-- Chapitre : {chapitre}
+- Chapitre : {chapitre}{pos}{catalog}
 
 Retourne UNIQUEMENT ce JSON (sans aucun markdown autour) :
 {{
@@ -77,12 +97,18 @@ def build_agent_redacteur_system() -> str:
 
 
 def build_agent_redacteur_user(
-    specialite: str, niveau: str, module: str, chapitre: str, plan_json: str
+    specialite: str, niveau: str, module: str, chapitre: str, plan_json: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
 ) -> str:
     niveau_desc = get_niveau_description(niveau)
+    pos = _chapitre_pos(numero_chapitre)
+    catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
     return f"""Rédige le contenu complet du cours en JSON à partir du plan ci-dessous.
 
-CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}
+CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}{pos}{catalog}
 
 PLAN :
 {plan_json}
@@ -160,11 +186,17 @@ def build_agent_designer_system() -> str:
 
 
 def build_agent_designer_user(
-    specialite: str, niveau: str, module: str, chapitre: str, contenu_json: str
+    specialite: str, niveau: str, module: str, chapitre: str, contenu_json: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
 ) -> str:
     valid = " | ".join(VALID_LAYOUTS)
+    pos = _chapitre_pos(numero_chapitre)
+    catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
     return f"""Crée la structure JSON de présentation pour :
-- {specialite} | Niveau {niveau} | {module} | {chapitre}
+- {specialite} | Niveau {niveau} | {module} | {chapitre}{pos}{catalog}
 
 CONTENU RÉDIGÉ :
 {contenu_json}
@@ -227,11 +259,17 @@ def build_agent_qualite_user(
     plan_json: str,
     contenu_resume_json: str,
     slides_json: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
 ) -> str:
     niveau_desc = get_niveau_description(niveau)
+    pos = _chapitre_pos(numero_chapitre)
+    catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
     return f"""Évalue la qualité de ce cours pour niveau {niveau} ({niveau_desc}).
 
-COURS : {specialite} | {module} | {chapitre}
+COURS : {specialite} | {module} | {chapitre}{pos}{catalog}
 
 PLAN PÉDAGOGIQUE :
 {plan_json}
@@ -266,14 +304,20 @@ def build_agent_quiz_system() -> str:
 
 
 def build_agent_quiz_user(
-    specialite: str, niveau: str, module: str, chapitre: str, contenu_markdown: str
+    specialite: str, niveau: str, module: str, chapitre: str, contenu_markdown: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
 ) -> str:
     niveau_desc = get_niveau_description(niveau)
+    pos = _chapitre_pos(numero_chapitre)
+    catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
     # Limite le contenu pour éviter le dépassement de contexte
     contenu_tronque = contenu_markdown[:6000] if len(contenu_markdown) > 6000 else contenu_markdown
     return f"""Génère un quiz GIFT Moodle à partir du cours suivant.
 
-CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}
+CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}{pos}{catalog}
 
 CONTENU DU COURS :
 {contenu_tronque}
