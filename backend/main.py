@@ -85,16 +85,51 @@ def _check_api_keys() -> None:
         print("[CONFIG] ❌  Aucun moteur IA configuré ! Ajoutez au moins une clé API dans .env")
 
 
-def build_course_filename(specialite: str, niveau: str, module: str, chapitre: str) -> str:
-    """Construit le nom de fichier : Spécialité-Niveau-Module-Chapitre.md"""
+def build_course_basename(
+    specialite: str,
+    niveau: str,
+    module: str,
+    chapitre: str,
+    code_moodle: str | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
+    """
+    Construit le nom de base (sans extension) d'un cours.
+
+    Si code_moodle et numero_chapitre sont fournis (catalogue IESIG) :
+        → {code_moodle}_Ch{NN}_{chapitre}       (ex: CGE-B2-M5_Ch03_Analyse-Financiere)
+    Sinon, fallback legacy :
+        → {specialite}-{niveau}-{module}-{chapitre}
+    """
+    if code_moodle and numero_chapitre:
+        return f"{_slugify(code_moodle)}_Ch{int(numero_chapitre):02d}_{_slugify(chapitre)}"
     parts = [specialite, niveau, module, chapitre]
-    name = "-".join(_slugify(p) for p in parts)
-    return f"{name}.md"
+    return "-".join(_slugify(p) for p in parts if p)
 
 
-def save_course(specialite: str, niveau: str, module: str, chapitre: str, contenu: str) -> Path:
+def build_course_filename(
+    specialite: str,
+    niveau: str,
+    module: str,
+    chapitre: str,
+    code_moodle: str | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
+    """Construit le nom de fichier .md d'un cours."""
+    return build_course_basename(specialite, niveau, module, chapitre, code_moodle, numero_chapitre) + ".md"
+
+
+def save_course(
+    specialite: str,
+    niveau: str,
+    module: str,
+    chapitre: str,
+    contenu: str,
+    code_moodle: str | None = None,
+    numero_chapitre: int | None = None,
+) -> Path:
     """Sauvegarde le contenu du cours dans cours_generes/ et retourne le chemin."""
-    filename = build_course_filename(specialite, niveau, module, chapitre)
+    filename = build_course_filename(specialite, niveau, module, chapitre, code_moodle, numero_chapitre)
     filepath = COURS_DIR / filename
     filepath.write_text(contenu, encoding="utf-8")
     return filepath
@@ -158,6 +193,11 @@ class GenerateRequest(BaseModel):
     module:     str = Field(..., min_length=1, max_length=200)
     chapitre:   str = Field(..., min_length=1, max_length=300)
     moteur: MoteurIA = Field(default=MoteurIA.MISTRAL)
+    # Métadonnées catalogue IESIG (optionnelles, injectées depuis specialites.json côté front)
+    code_moodle:     str | None = Field(default=None, max_length=50)
+    semestre:        str | None = Field(default=None, max_length=10)
+    heures:          int | None = Field(default=None, ge=1, le=500)
+    numero_chapitre: int | None = Field(default=None, ge=1, le=12)
 
 
 class GenerateResponse(BaseModel):
@@ -183,6 +223,9 @@ class PptxRequest(BaseModel):
     module:     str
     chapitre:   str
     niveau:     str = Field(default="")
+    # Métadonnées catalogue (optionnelles, pour nommage PPTX enrichi)
+    code_moodle:     str | None = Field(default=None, max_length=50)
+    numero_chapitre: int | None = Field(default=None, ge=1, le=12)
 
 
 class QuizRequest(BaseModel):
@@ -191,6 +234,11 @@ class QuizRequest(BaseModel):
     module:     str
     chapitre:   str
     moteur: MoteurIA = Field(default=MoteurIA.MISTRAL)
+    # Métadonnées catalogue (optionnelles, pour contexte prompt)
+    code_moodle:     str | None = Field(default=None, max_length=50)
+    semestre:        str | None = Field(default=None, max_length=10)
+    heures:          int | None = Field(default=None, ge=1, le=500)
+    numero_chapitre: int | None = Field(default=None, ge=1, le=12)
 
 
 class QuizResponse(BaseModel):
@@ -206,6 +254,9 @@ class PptxV2Request(BaseModel):
     niveau:      str
     module:      str
     chapitre:    str
+    # Métadonnées catalogue (optionnelles, pour nommage PPTX enrichi)
+    code_moodle:     str | None = Field(default=None, max_length=50)
+    numero_chapitre: int | None = Field(default=None, ge=1, le=12)
 
 
 class GenerateV2Request(BaseModel):
@@ -213,6 +264,11 @@ class GenerateV2Request(BaseModel):
     niveau:           str = Field(..., min_length=1, max_length=20)
     module:           str = Field(..., min_length=1, max_length=200)
     chapitre:         str = Field(..., min_length=1, max_length=300)
+    # Métadonnées catalogue IESIG (optionnelles)
+    code_moodle:      str | None = Field(default=None, max_length=50)
+    semestre:         str | None = Field(default=None, max_length=10)
+    heures:           int | None = Field(default=None, ge=1, le=500)
+    numero_chapitre:  int | None = Field(default=None, ge=1, le=12)
     # Reprise depuis un agent échoué (optionnel)
     resume_from:      str | None = Field(default=None)
     previous_results: dict | None = Field(default=None)
@@ -224,6 +280,11 @@ class GenerateV2QuizRequest(BaseModel):
     module:           str
     chapitre:         str
     contenu_markdown: str = Field(..., description="contenu_final_markdown issu du pipeline V2")
+    # Métadonnées catalogue (optionnelles, pour contexte prompt)
+    code_moodle:      str | None = Field(default=None, max_length=50)
+    semestre:         str | None = Field(default=None, max_length=10)
+    heures:           int | None = Field(default=None, ge=1, le=500)
+    numero_chapitre:  int | None = Field(default=None, ge=1, le=12)
 
 
 # ─────────────────────────────────────────────
@@ -238,6 +299,10 @@ def _build_prompts(request: GenerateRequest) -> tuple[str, str]:
         niveau=request.niveau,
         module=request.module,
         chapitre=request.chapitre,
+        code_moodle=request.code_moodle,
+        semestre=request.semestre,
+        heures=request.heures,
+        numero_chapitre=request.numero_chapitre,
     )
     if engine.uses_light_prompt:
         return build_system_prompt_light(**kwargs), build_user_message_light(**kwargs)
@@ -287,7 +352,10 @@ async def generate_course(request: Request, body: GenerateRequest, db: Session =
     if not contenu or not contenu.strip():
         raise HTTPException(status_code=500, detail="Le moteur IA n'a retourné aucun contenu.")
 
-    save_course(body.specialite, body.niveau, body.module, body.chapitre, contenu)
+    save_course(
+        body.specialite, body.niveau, body.module, body.chapitre, contenu,
+        code_moodle=body.code_moodle, numero_chapitre=body.numero_chapitre,
+    )
 
     db.add(HistoriqueEntry(
         id=generate_id(),
@@ -319,7 +387,10 @@ async def generate_course_stream(request: Request, body: GenerateRequest):
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
 
             contenu_complet = "".join(full_content)
-            save_course(body.specialite, body.niveau, body.module, body.chapitre, contenu_complet)
+            save_course(
+                body.specialite, body.niveau, body.module, body.chapitre, contenu_complet,
+                code_moodle=body.code_moodle, numero_chapitre=body.numero_chapitre,
+            )
 
             add_history_entry(HistoriqueEntry(
                 id=generate_id(),
@@ -427,9 +498,11 @@ async def generate_pptx(request: Request, body: PptxRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint : {e}")
 
-    # Nom de fichier : Spécialité-Niveau-Module-Chapitre.pptx
-    parts = [body.specialite, body.niveau, body.module, body.chapitre]
-    filename = "-".join(_slugify(p) for p in parts if p) + ".pptx"
+    # Nommage : {code_moodle}_Ch{NN}_{chapitre}.pptx si catalogue, sinon fallback legacy
+    filename = build_course_basename(
+        body.specialite, body.niveau, body.module, body.chapitre,
+        code_moodle=body.code_moodle, numero_chapitre=body.numero_chapitre,
+    ) + ".pptx"
     return StreamingResponse(
         iter([pptx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -441,18 +514,18 @@ async def generate_pptx(request: Request, body: PptxRequest):
 @limiter.limit("20/minute")
 async def generate_quiz(request: Request, body: QuizRequest):
     engine = get_engine(body.moteur.value)
-    system_prompt = build_quiz_prompt(
+    meta_kwargs = dict(
         specialite=body.specialite,
         niveau=body.niveau,
         module=body.module,
         chapitre=body.chapitre,
+        code_moodle=body.code_moodle,
+        semestre=body.semestre,
+        heures=body.heures,
+        numero_chapitre=body.numero_chapitre,
     )
-    user_message = build_quiz_user_message(
-        specialite=body.specialite,
-        niveau=body.niveau,
-        module=body.module,
-        chapitre=body.chapitre,
-    )
+    system_prompt = build_quiz_prompt(**meta_kwargs)
+    user_message  = build_quiz_user_message(**meta_kwargs)
 
     try:
         contenu_gift = await engine.generate(system_prompt, user_message)
@@ -521,9 +594,11 @@ async def generate_v2_pptx(request: PptxV2Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint V2 : {e}")
 
-    # Nom de fichier : Spécialité-Niveau-Module-Chapitre.pptx
-    parts = [request.specialite, request.niveau, request.module, request.chapitre]
-    filename = "-".join(_slugify(p) for p in parts if p) + ".pptx"
+    # Nommage : {code_moodle}_Ch{NN}_{chapitre}.pptx si catalogue, sinon fallback legacy
+    filename = build_course_basename(
+        request.specialite, request.niveau, request.module, request.chapitre,
+        code_moodle=request.code_moodle, numero_chapitre=request.numero_chapitre,
+    ) + ".pptx"
     return StreamingResponse(
         iter([pptx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -568,6 +643,10 @@ async def generate_v2_stream(request: Request, body: GenerateV2Request):
                     niveau=body.niveau,
                     module=body.module,
                     chapitre=body.chapitre,
+                    code_moodle=body.code_moodle,
+                    semestre=body.semestre,
+                    heures=body.heures,
+                    numero_chapitre=body.numero_chapitre,
                     resume_from=body.resume_from,
                     previous_results=body.previous_results,
                 ):
@@ -578,6 +657,8 @@ async def generate_v2_stream(request: Request, body: GenerateV2Request):
                             save_course(
                                 body.specialite, body.niveau,
                                 body.module, body.chapitre, contenu_md,
+                                code_moodle=body.code_moodle,
+                                numero_chapitre=body.numero_chapitre,
                             )
                         add_history_entry(HistoriqueEntry(
                             id=generate_id(),
@@ -593,7 +674,11 @@ async def generate_v2_stream(request: Request, body: GenerateV2Request):
 
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except asyncio.TimeoutError:
-            yield f"data: {json.dumps({'event': 'fatal_error', 'error': f'Timeout global du pipeline ({_PIPELINE_TIMEOUT}s). Réessayez ou relancez depuis l\\'agent échoué.'}, ensure_ascii=False)}\n\n"
+            err_msg = (
+                f"Timeout global du pipeline ({_PIPELINE_TIMEOUT}s). "
+                f"Réessayez ou relancez depuis l'agent échoué."
+            )
+            yield f"data: {json.dumps({'event': 'fatal_error', 'error': err_msg}, ensure_ascii=False)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'event': 'fatal_error', 'error': str(e)}, ensure_ascii=False)}\n\n"
 
@@ -620,6 +705,10 @@ async def generate_v2_quiz_stream(request: Request, body: GenerateV2QuizRequest)
                 module=body.module,
                 chapitre=body.chapitre,
                 contenu_markdown=body.contenu_markdown,
+                code_moodle=body.code_moodle,
+                semestre=body.semestre,
+                heures=body.heures,
+                numero_chapitre=body.numero_chapitre,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
