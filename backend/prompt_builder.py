@@ -3,6 +3,33 @@ Module de construction du prompt pédagogique pour CourseGen AI.
 Construit un prompt système structuré adapté au niveau de l'étudiant.
 """
 
+# Chaque cours IESIG comporte 12 chapitres (structure pédagogique standardisée)
+NB_CHAPITRES_PAR_COURS = 12
+
+
+def build_catalog_context(
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
+    """
+    Formate les métadonnées du catalogue IESIG en bloc contextuel injectable
+    dans les prompts. Retourne une chaîne vide si aucune métadonnée n'est fournie.
+    """
+    lines = []
+    if code_moodle:
+        lines.append(f"- Code Moodle : {code_moodle}")
+    if semestre:
+        lines.append(f"- Semestre : {semestre}")
+    if heures:
+        lines.append(f"- Volume horaire du module : {heures}h")
+    if numero_chapitre:
+        lines.append(f"- Position du chapitre : {numero_chapitre} / {NB_CHAPITRES_PAR_COURS}")
+    if not lines:
+        return ""
+    return "CONTEXTE CATALOGUE IESIG :\n" + "\n".join(lines)
+
 
 def get_niveau_description(niveau: str) -> str:
     """Retourne une description du niveau attendu pour adapter le contenu."""
@@ -25,7 +52,13 @@ def get_niveau_description(niveau: str) -> str:
     )
 
 
-def build_system_prompt(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+def build_system_prompt(
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
     """
     Construit le prompt système pédagogique structuré.
 
@@ -34,11 +67,14 @@ def build_system_prompt(specialite: str, niveau: str, module: str, chapitre: str
         niveau: Le niveau d'études (ex: "L3", "M1")
         module: Le nom du module (ex: "Systèmes d'exploitation")
         chapitre: Le sujet du chapitre (ex: "Gestion de la mémoire")
+        code_moodle, semestre, heures, numero_chapitre: métadonnées catalogue IESIG (optionnelles)
 
     Returns:
         Le prompt système complet pour le LLM.
     """
     niveau_desc = get_niveau_description(niveau)
+    catalog_ctx = build_catalog_context(code_moodle, semestre, heures, numero_chapitre)
+    catalog_block = f"\n\n{catalog_ctx}" if catalog_ctx else ""
 
     system_prompt = f"""Tu es un professeur universitaire expert et pédagogue, spécialisé en {specialite}. Tu rédiges un cours académique exhaustif et de très haute qualité pour des étudiants de {niveau_desc}.
 
@@ -46,7 +82,7 @@ CONTEXTE PÉDAGOGIQUE :
 - Spécialité : {specialite}
 - Niveau : {niveau} — {niveau_desc}
 - Module : {module}
-- Chapitre : {chapitre}
+- Chapitre : {chapitre}{catalog_block}
 
 INSTRUCTIONS STRICTES :
 
@@ -133,10 +169,20 @@ IMPORTANT : Ne génère AUCUN contenu hors-sujet. Concentre-toi exclusivement su
     return system_prompt
 
 
-def build_user_message(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+def build_user_message(
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
     """Construit le message utilisateur pour le LLM."""
+    chapitre_pos = (
+        f" (chapitre {numero_chapitre}/{NB_CHAPITRES_PAR_COURS})"
+        if numero_chapitre else ""
+    )
     return (
-        f"Génère le cours complet, exhaustif et très détaillé pour le chapitre \"{chapitre}\" "
+        f"Génère le cours complet, exhaustif et très détaillé pour le chapitre \"{chapitre}\"{chapitre_pos} "
         f"du module \"{module}\" en {specialite}, niveau {niveau}. "
         f"Le cours doit être riche, approfondi, avec de nombreux exemples concrets, des données factuelles, "
         f"des études de cas réels et un développement substantiel de chaque sous-partie (minimum 2000 mots au total). "
@@ -144,16 +190,26 @@ def build_user_message(specialite: str, niveau: str, module: str, chapitre: str)
     )
 
 
-def build_system_prompt_light(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+def build_system_prompt_light(
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
     """
     Version allégée du prompt système pour les APIs avec contraintes de taille (ex: Oxlo).
     Produit un cours structuré et de qualité sans surcharger l'infrastructure.
     """
     niveau_desc = get_niveau_description(niveau)
+    chapitre_pos = (
+        f" (chapitre {numero_chapitre}/{NB_CHAPITRES_PAR_COURS})"
+        if numero_chapitre else ""
+    )
 
     return f"""Tu es un professeur universitaire spécialisé en {specialite}. Rédige un cours académique complet et détaillé pour des étudiants de {niveau_desc}.
 
-Contexte : Module "{module}" | Chapitre "{chapitre}"
+Contexte : Module "{module}" | Chapitre "{chapitre}"{chapitre_pos}
 
 Structure obligatoire (Markdown, en français) :
 ## Introduction et Objectifs Pédagogiques
@@ -173,16 +229,32 @@ Structure obligatoire (Markdown, en français) :
 Exigences : minimum 1500 mots, exemples concrets, données factuelles, vocabulaire adapté au niveau {niveau}."""
 
 
-def build_user_message_light(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+def build_user_message_light(
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
     """Version allégée du message utilisateur pour les APIs avec contraintes."""
+    chapitre_pos = (
+        f" (chapitre {numero_chapitre}/{NB_CHAPITRES_PAR_COURS})"
+        if numero_chapitre else ""
+    )
     return (
-        f"Génère le cours complet pour le chapitre \"{chapitre}\" "
+        f"Génère le cours complet pour le chapitre \"{chapitre}\"{chapitre_pos} "
         f"du module \"{module}\" en {specialite}, niveau {niveau}. "
         f"Contenu riche, structuré, avec exemples concrets et définitions précises."
     )
 
 
-def build_quiz_prompt(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+def build_quiz_prompt(
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
     """
     Construit le prompt pour générer un quiz au format GIFT à partir d'un cours.
 
@@ -190,6 +262,8 @@ def build_quiz_prompt(specialite: str, niveau: str, module: str, chapitre: str) 
     Génère uniquement des QCM et des questions Vrai/Faux.
     """
     niveau_desc = get_niveau_description(niveau)
+    catalog_ctx = build_catalog_context(code_moodle, semestre, heures, numero_chapitre)
+    catalog_block = f"\n{catalog_ctx}" if catalog_ctx else ""
 
     return f"""Tu es un enseignant expert en {specialite} qui crée des évaluations pédagogiques rigoureuses.
 Tu dois générer un quiz complet au format GIFT (format d'import Moodle) pour le chapitre suivant :
@@ -197,7 +271,7 @@ Tu dois générer un quiz complet au format GIFT (format d'import Moodle) pour l
 - Spécialité : {specialite}
 - Niveau : {niveau} — {niveau_desc}
 - Module : {module}
-- Chapitre : {chapitre}
+- Chapitre : {chapitre}{catalog_block}
 
 INSTRUCTIONS STRICTES :
 
@@ -240,10 +314,20 @@ IMPORTANT :
 - Commence directement par le premier commentaire de section //"""
 
 
-def build_quiz_user_message(specialite: str, niveau: str, module: str, chapitre: str) -> str:
+def build_quiz_user_message(
+    specialite: str, niveau: str, module: str, chapitre: str,
+    code_moodle: str | None = None,
+    semestre: str | None = None,
+    heures: int | None = None,
+    numero_chapitre: int | None = None,
+) -> str:
     """Message utilisateur pour la génération du quiz GIFT."""
+    chapitre_pos = (
+        f" (chapitre {numero_chapitre}/{NB_CHAPITRES_PAR_COURS})"
+        if numero_chapitre else ""
+    )
     return (
-        f"Génère le quiz complet au format GIFT pour le chapitre \"{chapitre}\" "
+        f"Génère le quiz complet au format GIFT pour le chapitre \"{chapitre}\"{chapitre_pos} "
         f"du module \"{module}\" en {specialite}, niveau {niveau}. "
         f"Entre 10 et 20 questions (QCM et Vrai/Faux uniquement) selon la complexité du chapitre, "
         f"couvrant l'ensemble du chapitre, format GIFT strict prêt à importer dans Moodle."
