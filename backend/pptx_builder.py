@@ -11,6 +11,8 @@ from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.oxml.ns import qn
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION
 from lxml import etree
 
 # ═══════════════════════════════════════════════════════
@@ -31,6 +33,15 @@ C_TABLE_ROW1   = RGBColor(0x12, 0x12, 0x28)
 C_TABLE_ROW2   = RGBColor(0x18, 0x18, 0x34)
 C_SUCCESS      = RGBColor(0x34, 0xD3, 0x99)
 C_BULLET       = RGBColor(0x6E, 0x75, 0xF9)   # Couleur des marqueurs bullets
+
+# ═══════════════════════════════════════════════════════
+#  TYPOGRAPHIE
+# ═══════════════════════════════════════════════════════
+# Aptos est la police moderne par défaut de Microsoft 365 (2023+).
+# Aptos Display est optimisée pour les grands titres (contraste + lisibilité).
+# Fallback automatique vers Calibri si Aptos indisponible.
+FONT_DISPLAY = 'Aptos Display'   # Titres, grands chiffres, labels de section
+FONT_BODY    = 'Aptos'           # Corps de texte, puces, descriptions
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
@@ -192,39 +203,201 @@ def _set_bg(slide, color: RGBColor):
     bg.fill.fore_color.rgb = color
 
 
-def _run_fmt(run, size_pt: int, color: RGBColor, bold=False, italic=False):
+def _run_fmt(run, size_pt: int, color: RGBColor, bold=False, italic=False,
+             font: str = FONT_BODY):
     run.font.size    = Pt(size_pt)
     run.font.color.rgb = color
     run.font.bold    = bold
     run.font.italic  = italic
-    run.font.name    = 'Calibri'
+    run.font.name    = font
 
 
-def _add_runs(para, raw_text: str, size_pt: int, color: RGBColor, base_bold=False):
+def _add_runs(para, raw_text: str, size_pt: int, color: RGBColor, base_bold=False,
+              font: str = FONT_BODY):
     for seg_text, is_bold in _parse_inline(raw_text):
         run = para.add_run()
         run.text = seg_text
-        _run_fmt(run, size_pt, color, bold=(base_bold or is_bold))
+        _run_fmt(run, size_pt, color, bold=(base_bold or is_bold), font=font)
 
 
 def _add_transparent_rect(slide, left, top, width, height, color: RGBColor, opacity: int):
-    """Rectangle avec transparence. opacity: 0=invisible, 100=opaque (%)."""
+    """Rectangle avec transparence. opacity: 0=invisible, 100=opaque (%).
+
+    On passe par l'API haut niveau (`_fill_solid`) pour que le solidFill créé
+    surcharge correctement le `p:style` par défaut du shape (qui pointe vers
+    le thème Office — fill bleu clair d'accent 2). Sans ça, le style thème
+    prend le dessus et la couleur/alpha ne sont pas appliqués.
+    Puis on injecte l'élément <a:alpha> dans le srgbClr déjà créé.
+    """
     s = slide.shapes.add_shape(1, Inches(left), Inches(top), Inches(width), Inches(height))
-    s.line.fill.background()
-    sp = s._element
+    _no_line(s)
+    _fill_solid(s, color)
+
+    ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+    spPr = s._element.find(qn('p:spPr'))
+    if spPr is None:
+        return s
+    solid = spPr.find(qn('a:solidFill'))
+    if solid is None:
+        return s
+    srgb = solid.find(qn('a:srgbClr'))
+    if srgb is None:
+        return s
+    # Nettoie un éventuel alpha existant pour éviter les doublons
+    for ex in srgb.findall(qn('a:alpha')):
+        srgb.remove(ex)
+    alpha = etree.SubElement(srgb, f'{{{ns}}}alpha')
+    # DrawingML ST_PositivePercentage : 100000 = 100 % opaque
+    alpha.set('val', str(int(opacity * 1000)))
+    return s
+
+
+_DML_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+
+
+def _fill_gradient(shape, stops: list, angle_deg: float = 90.0):
+    """
+    Applique un gradient linéaire. stops = [(pos_0_100, RGBColor), ...].
+    angle_deg : 0 = gauche→droite, 90 = haut→bas, 45 = diagonal descendant.
+    """
+    sp = shape._element
     spPr = sp.find(qn('p:spPr'))
-    # Remplace le fill existant par un solidFill avec alpha
     for child in list(spPr):
         tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
         if tag in ('solidFill', 'gradFill', 'pattFill', 'noFill', 'blipFill'):
             spPr.remove(child)
-    ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-    solid = etree.SubElement(spPr, f'{{{ns}}}solidFill')
-    clr   = etree.SubElement(solid, f'{{{ns}}}srgbClr')
-    clr.set('val', f'{color[0]:02X}{color[1]:02X}{color[2]:02X}')
-    alpha = etree.SubElement(clr, f'{{{ns}}}alpha')
-    alpha.set('val', str(opacity * 1000))   # 100000 = 100% opaque
-    return s
+    grad = etree.SubElement(spPr, f'{{{_DML_NS}}}gradFill')
+    grad.set('flip', 'none')
+    grad.set('rotWithShape', '1')
+    gsLst = etree.SubElement(grad, f'{{{_DML_NS}}}gsLst')
+    for pos_pct, col in stops:
+        gs = etree.SubElement(gsLst, f'{{{_DML_NS}}}gs')
+        gs.set('pos', str(int(pos_pct * 1000)))
+        srgb = etree.SubElement(gs, f'{{{_DML_NS}}}srgbClr')
+        srgb.set('val', f'{col[0]:02X}{col[1]:02X}{col[2]:02X}')
+    lin = etree.SubElement(grad, f'{{{_DML_NS}}}lin')
+    lin.set('ang', str(int(angle_deg * 60000)))
+    lin.set('scaled', '0')
+    shape.line.fill.background()
+    return shape
+
+
+def _add_shadow(shape, blur_pt: int = 8, dist_pt: int = 4,
+                alpha_pct: int = 40, dir_deg: int = 90):
+    """
+    Ombre portée subtile. blur_pt/dist_pt en points, alpha_pct 0-100,
+    dir_deg : 90 = vers le bas, 135 = bas-droite.
+    """
+    sp = shape._element
+    spPr = sp.find(qn('p:spPr'))
+    for child in list(spPr):
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag == 'effectLst':
+            spPr.remove(child)
+    effectLst = etree.Element(f'{{{_DML_NS}}}effectLst')
+    outerShdw = etree.SubElement(effectLst, f'{{{_DML_NS}}}outerShdw')
+    outerShdw.set('blurRad', str(blur_pt * 12700))
+    outerShdw.set('dist', str(dist_pt * 12700))
+    outerShdw.set('dir', str(int(dir_deg * 60000)))
+    outerShdw.set('algn', 'ctr')
+    outerShdw.set('rotWithShape', '0')
+    srgb = etree.SubElement(outerShdw, f'{{{_DML_NS}}}srgbClr')
+    srgb.set('val', '000000')
+    alpha = etree.SubElement(srgb, f'{{{_DML_NS}}}alpha')
+    alpha.set('val', str(alpha_pct * 1000))
+    # Position correcte dans l'ordre des enfants de spPr : après <a:ln> si présent.
+    ln = spPr.find(qn('a:ln'))
+    if ln is not None:
+        ln.addnext(effectLst)
+    else:
+        spPr.append(effectLst)
+    return shape
+
+
+def _add_footer(slide, left_text: str, page_num: int, total: int):
+    """
+    Pied de page minimaliste : module · chapitre à gauche, "n / N" à droite.
+    Typographie 9pt gris muted, sans ligne ni barre pour rester discret.
+    """
+    footer_y = 7.30
+    footer_h = 0.18
+
+    # Zone gauche : module · chapitre
+    tb_l = _tb(slide, 0.35, footer_y, 9.5, footer_h)
+    tf_l = tb_l.text_frame
+    tf_l.margin_left   = Inches(0)
+    tf_l.margin_right  = Inches(0)
+    tf_l.margin_top    = Inches(0)
+    tf_l.margin_bottom = Inches(0)
+    tf_l.word_wrap = False
+    p_l = tf_l.paragraphs[0]
+    p_l.alignment = PP_ALIGN.LEFT
+    run_l = p_l.add_run()
+    run_l.text = left_text
+    _run_fmt(run_l, 9, C_TEXT_MUTED, font=FONT_BODY)
+
+    # Zone droite : pagination
+    tb_r = _tb(slide, 10.5, footer_y, 2.63, footer_h)
+    tf_r = tb_r.text_frame
+    tf_r.margin_left   = Inches(0)
+    tf_r.margin_right  = Inches(0)
+    tf_r.margin_top    = Inches(0)
+    tf_r.margin_bottom = Inches(0)
+    tf_r.word_wrap = False
+    p_r = tf_r.paragraphs[0]
+    p_r.alignment = PP_ALIGN.RIGHT
+    run_r = p_r.add_run()
+    run_r.text = f"{page_num} / {total}"
+    _run_fmt(run_r, 9, C_TEXT_MUTED, font=FONT_BODY)
+
+
+def _apply_footers(prs, module: str, chapitre: str):
+    """Ajoute le pied de page à toutes les slides sauf la slide titre (index 0)."""
+    slides_list = list(prs.slides)
+    total = len(slides_list)
+    left_text = f"{module}  ·  {chapitre}"
+    # Limite de largeur au cas où la combinaison est très longue
+    if len(left_text) > 110:
+        left_text = left_text[:107] + '…'
+    for i, slide in enumerate(slides_list):
+        if i == 0:  # slide titre : composition dédiée, pas de footer
+            continue
+        _add_footer(slide, left_text, i + 1, total)
+
+
+def _icon_chip(slide, left: float, top: float, size: float, glyph: str,
+               bg_color: RGBColor = None, fg_color: RGBColor = None,
+               glyph_size_pt: int = None, with_shadow: bool = True):
+    """
+    Médaillon circulaire avec un pictogramme centré.
+    Utilisé pour marquer visuellement le type d'une slide (définition, point clé, etc.).
+    """
+    if bg_color is None:
+        bg_color = C_ACCENT
+    if fg_color is None:
+        fg_color = C_WHITE
+    if glyph_size_pt is None:
+        glyph_size_pt = max(12, int(size * 30))
+
+    chip = slide.shapes.add_shape(9, Inches(left), Inches(top),
+                                  Inches(size), Inches(size))
+    _fill_solid(chip, bg_color)
+    _no_line(chip)
+    if with_shadow:
+        _add_shadow(chip, blur_pt=6, dist_pt=2, alpha_pct=40, dir_deg=90)
+
+    tb = _tb(slide, left, top, size, size)
+    tf = tb.text_frame
+    tf.margin_left   = Inches(0.02)
+    tf.margin_right  = Inches(0.02)
+    tf.margin_top    = Inches(0)
+    tf.margin_bottom = Inches(0)
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    run = p.add_run()
+    run.text = glyph
+    _run_fmt(run, glyph_size_pt, fg_color, bold=True, font=FONT_DISPLAY)
+    return chip
 
 
 def _section_badge(slide, label: str, left: float, top: float):
@@ -237,7 +410,7 @@ def _section_badge(slide, label: str, left: float, top: float):
     p = tf.paragraphs[0]
     run = p.add_run()
     run.text = label.upper()
-    _run_fmt(run, 8, C_ACCENT2, bold=True)
+    _run_fmt(run, 8, C_ACCENT2, bold=True, font=FONT_DISPLAY)
 
 
 # ═══════════════════════════════════════════════════════
@@ -249,11 +422,14 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_bg(slide, C_BG)
 
-    # ── Panneau gauche violet ──────────────────────────
-    _rect(slide, 0, 0, 4.4, 7.5, C_PANEL)
-    # Bande inférieure plus sombre sur le panneau
-    _rect(slide, 0, 5.6, 4.4, 1.9, C_ACCENT_DARK)
-    # Ligne de séparation subtile
+    # ── Panneau gauche violet (gradient vertical) ─────
+    panel = _rect(slide, 0, 0, 4.4, 7.5, C_PANEL)
+    _fill_gradient(panel, [
+        (0,   C_PANEL),
+        (65,  C_PANEL),
+        (100, C_ACCENT_DARK),
+    ], angle_deg=90)
+    # Ligne de séparation subtile au raccord
     _rect(slide, 0, 5.58, 4.4, 0.04, C_ACCENT2)
 
     # ── Déco panneau gauche ───────────────────────────
@@ -269,7 +445,7 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     p = tf.paragraphs[0]
     run = p.add_run()
     run.text = specialite.upper()
-    _run_fmt(run, 13, C_WHITE, bold=True)
+    _run_fmt(run, 13, C_WHITE, bold=True, font=FONT_DISPLAY)
 
     _rect(slide, 0.35, 2.0, 1.2, 0.04, C_WHITE)
 
@@ -279,7 +455,7 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     p2.alignment = PP_ALIGN.LEFT
     run2 = p2.add_run()
     run2.text = f"NIVEAU {niveau.upper()}"
-    _run_fmt(run2, 11, C_ACCENT2, bold=True)
+    _run_fmt(run2, 11, C_ACCENT2, bold=True, font=FONT_DISPLAY)
 
     tb_mod = _tb(slide, 0.35, 5.75, 3.7, 0.9)
     tf_mod = tb_mod.text_frame
@@ -294,33 +470,46 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     RIGHT_W = 13.33 - RIGHT_L   # 8.93"
 
     if title_image:
-        # Image de fond sur tout le panneau droit
+        # Image de fond sur tout le panneau droit (pleine hauteur, pleine visibilité)
         slide.shapes.add_picture(
             BytesIO(title_image),
             Inches(RIGHT_L), Inches(0), Inches(RIGHT_W), Inches(7.5)
         )
-        # Overlay sombre pour lisibilité du texte (70% opaque)
-        _add_transparent_rect(slide, RIGHT_L, 0, RIGHT_W, 7.5, C_BG, 70)
-        # Gradient plus dense en bas (bande titre)
-        _add_transparent_rect(slide, RIGHT_L, 4.5, RIGHT_W, 3.0, C_BG, 85)
+        # Bande sombre UNIQUEMENT en bas (zone du titre) — l'image reste visible
+        # sur toute la partie haute. Opacité élevée (92 %) pour que le titre blanc
+        # soit parfaitement lisible quelle que soit l'image choisie.
+        BAND_TOP = 5.0
+        BAND_H   = 2.5
+        _add_transparent_rect(slide, RIGHT_L, BAND_TOP, RIGHT_W, BAND_H, C_BG, 92)
+
+        # Trait accent placé AU-DESSUS du titre, dans la bande sombre
+        _rect(slide, 4.75, BAND_TOP + 0.22, 2.0, 0.05, C_ACCENT)
+
+        # Titre principal centré verticalement dans la bande sombre
+        tb_title = _tb(slide, 4.75, BAND_TOP + 0.45, 8.2, BAND_H - 0.75)
+        tf_title = tb_title.text_frame
+        tf_title.word_wrap = True
+        p_title = tf_title.paragraphs[0]
+        _add_runs(p_title, chapitre, 32, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+        p_title.alignment = PP_ALIGN.LEFT
+        p_title.space_after = Pt(6)
     else:
-        # Déco par défaut : grand cercle sombre
+        # Pas d'image : grand cercle déco + titre en haut (comportement historique)
         circ2 = slide.shapes.add_shape(9, Inches(9.5), Inches(4.5), Inches(4.5), Inches(4.5))
         circ2.fill.solid()
         circ2.fill.fore_color.rgb = C_ACCENT_DARK
         _no_line(circ2)
 
-    # Titre principal
-    tb_title = _tb(slide, 4.75, 1.5, 8.2, 4.2)
-    tf_title = tb_title.text_frame
-    tf_title.word_wrap = True
-    p_title = tf_title.paragraphs[0]
-    _add_runs(p_title, chapitre, 36, C_WHITE, base_bold=True)
-    p_title.alignment = PP_ALIGN.LEFT
-    p_title.space_after = Pt(10)
+        tb_title = _tb(slide, 4.75, 1.5, 8.2, 4.2)
+        tf_title = tb_title.text_frame
+        tf_title.word_wrap = True
+        p_title = tf_title.paragraphs[0]
+        _add_runs(p_title, chapitre, 36, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+        p_title.alignment = PP_ALIGN.LEFT
+        p_title.space_after = Pt(10)
 
-    # Ligne déco sous titre
-    _rect(slide, 4.75, 6.1, 2.0, 0.05, C_ACCENT)
+        # Trait déco sous le titre
+        _rect(slide, 4.75, 6.1, 2.0, 0.05, C_ACCENT)
 
     # Attribution photographe Unsplash (obligatoire)
     if title_image and photographer:
@@ -359,21 +548,21 @@ def _make_section_slide(prs, title: str, numero: int = 0):
         p.alignment = PP_ALIGN.RIGHT
         run = p.add_run()
         run.text = CHIFFRES_ROMAINS[numero - 1]
-        _run_fmt(run, 200, RGBColor(0x7C, 0x7F, 0xF5), bold=True)
+        _run_fmt(run, 200, RGBColor(0x7C, 0x7F, 0xF5), bold=True, font=FONT_DISPLAY)
 
     # Petite étiquette "SECTION X" en haut
     tb_lbl = _tb(slide, 0.6, 0.3, 5, 0.45)
     p_lbl = tb_lbl.text_frame.paragraphs[0]
     run_lbl = p_lbl.add_run()
     run_lbl.text = f"SECTION {CHIFFRES_ROMAINS[numero - 1]}" if 0 < numero <= len(CHIFFRES_ROMAINS) else "SECTION"
-    _run_fmt(run_lbl, 11, RGBColor(0xC7, 0xD2, 0xFE))
+    _run_fmt(run_lbl, 11, RGBColor(0xC7, 0xD2, 0xFE), bold=True, font=FONT_DISPLAY)
 
     # Titre de section
     tb = _tb(slide, 0.6, 1.5, 10.0, 4.5)
     tf = tb.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 40, C_WHITE, base_bold=True)
+    _add_runs(p, title, 40, C_WHITE, base_bold=True, font=FONT_DISPLAY)
     p.alignment = PP_ALIGN.LEFT
 
     return slide
@@ -411,7 +600,7 @@ def _make_content_slide(prs, title: str, content_lines: list[str],
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
 
     # Séparateur
     sep_top = top_title + 1.0
@@ -419,7 +608,7 @@ def _make_content_slide(prs, title: str, content_lines: list[str],
 
     # Corps
     body_top = sep_top + 0.18
-    body_h   = 7.5 - body_top - 0.15
+    body_h   = 7.5 - body_top - 0.35
     tb_body = _tb(slide, 0.22, body_top, 12.9, body_h)
     tf = tb_body.text_frame
     tf.word_wrap = True
@@ -447,13 +636,13 @@ def _make_two_column_slide(prs, title: str, bullets: list[str], section_label: s
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
 
     body_top = sep_top + 0.18
-    body_h   = 7.5 - body_top - 0.15
+    body_h   = 7.5 - body_top - 0.35
 
     mid = (len(bullets) + 1) // 2
     col1, col2 = bullets[:mid], bullets[mid:]
@@ -490,7 +679,7 @@ def _make_table_slide(prs, title: str, headers: list[str], rows: list[list[str]]
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -540,20 +729,22 @@ def _make_definitions_slide(prs, items: list[tuple[str, str]]):
     _set_bg(slide, C_BG_CARD)
     _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
 
-    # Header band
-    _rect(slide, 0.09, 0, 13.24, 0.75, C_ACCENT_DARK)
+    # Header band (gradient horizontal)
+    header = _rect(slide, 0.09, 0, 13.24, 0.75, C_ACCENT_DARK)
+    _fill_gradient(header, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)], angle_deg=0)
 
-    tb_hdr = _tb(slide, 0.3, 0.1, 12.7, 0.55)
+    _icon_chip(slide, 0.28, 0.14, 0.48, '◈', bg_color=C_ACCENT)
+    tb_hdr = _tb(slide, 0.9, 0.1, 12.1, 0.55)
     p = tb_hdr.text_frame.paragraphs[0]
     p.alignment = PP_ALIGN.LEFT
     run = p.add_run()
-    run.text = '  DÉFINITIONS DES CONCEPTS CLÉS'
-    _run_fmt(run, 16, C_WHITE, bold=True)
+    run.text = 'DÉFINITIONS DES CONCEPTS CLÉS'
+    _run_fmt(run, 16, C_WHITE, bold=True, font=FONT_DISPLAY)
 
     # Ligne sous le header
     _rect(slide, 0.09, 0.73, 13.24, 0.03, C_ACCENT)
 
-    tb_body = _tb(slide, 0.3, 0.9, 12.85, 6.4)
+    tb_body = _tb(slide, 0.3, 0.9, 12.85, 6.2)
     tf = tb_body.text_frame
     tf.word_wrap = True
 
@@ -566,7 +757,7 @@ def _make_definitions_slide(prs, items: list[tuple[str, str]]):
         _run_fmt(run_b, 10, C_BULLET, bold=True)
         run_t = p.add_run()
         run_t.text = f"{_clean(terme)}  "
-        _run_fmt(run_t, 13, C_ACCENT2, bold=True)
+        _run_fmt(run_t, 13, C_ACCENT2, bold=True, font=FONT_DISPLAY)
         run_d = p.add_run()
         run_d.text = _clean(definition)
         _run_fmt(run_d, 12, C_TEXT_LIGHT)
@@ -583,14 +774,16 @@ def _make_key_points_slide(prs, points: list[str]):
     _set_bg(slide, C_BG_CARD)
     _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
 
-    # Header band
-    _rect(slide, 0.09, 0, 13.24, 0.75, C_ACCENT_DARK)
+    # Header band (gradient horizontal)
+    header = _rect(slide, 0.09, 0, 13.24, 0.75, C_ACCENT_DARK)
+    _fill_gradient(header, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)], angle_deg=0)
 
-    tb_hdr = _tb(slide, 0.3, 0.1, 12.7, 0.55)
+    _icon_chip(slide, 0.28, 0.14, 0.48, '★', bg_color=C_ACCENT)
+    tb_hdr = _tb(slide, 0.9, 0.1, 12.1, 0.55)
     p = tb_hdr.text_frame.paragraphs[0]
     run = p.add_run()
-    run.text = '  POINTS IMPORTANTS À RETENIR'
-    _run_fmt(run, 16, C_WHITE, bold=True)
+    run.text = 'POINTS IMPORTANTS À RETENIR'
+    _run_fmt(run, 16, C_WHITE, bold=True, font=FONT_DISPLAY)
 
     _rect(slide, 0.09, 0.73, 13.24, 0.03, C_ACCENT)
 
@@ -599,13 +792,13 @@ def _make_key_points_slide(prs, points: list[str]):
     if len(pts) > 6:
         mid = (len(pts) + 1) // 2
         cols = [(pts[:mid], 0.3), (pts[mid:], 6.85)]
-        _rect(slide, 6.76, 0.85, 0.02, 6.5, C_ACCENT_MID)
+        _rect(slide, 6.76, 0.85, 0.02, 6.3, C_ACCENT_MID)
     else:
         cols = [(pts, 0.3)]
 
     for col_pts, lx in cols:
         col_w = 6.2 if len(cols) > 1 else 12.85
-        tb = _tb(slide, lx, 0.9, col_w, 6.4)
+        tb = _tb(slide, lx, 0.9, col_w, 6.2)
         tf = tb.text_frame
         tf.word_wrap = True
         for i, point in enumerate(col_pts):
@@ -615,7 +808,7 @@ def _make_key_points_slide(prs, points: list[str]):
             idx = pts.index(point)
             run_num = p.add_run()
             run_num.text = f"{CIRCLED_NUMS[idx]}  "
-            _run_fmt(run_num, 15, C_ACCENT, bold=True)
+            _run_fmt(run_num, 15, C_ACCENT, bold=True, font=FONT_DISPLAY)
             _add_runs(p, point, 13, C_TEXT_LIGHT)
 
     return slide
@@ -624,6 +817,268 @@ def _make_key_points_slide(prs, points: list[str]):
 # ═══════════════════════════════════════════════════════
 #  SLIDES V2 — layouts du pipeline multi-agents
 # ═══════════════════════════════════════════════════════
+
+def _parse_numeric(value_str) -> tuple:
+    """
+    Extrait (nombre, suffixe) d'une chaîne. Exemples :
+    "73%"        -> (73.0, "%")
+    "1 500 €"    -> (1500.0, "€")
+    "élevé"      -> (None, "")
+    "2,5 M€"     -> (2.5, "M€")
+    """
+    s = str(value_str).strip()
+    m = re.search(r'-?\d+(?:[\s\u202f]\d+)*(?:[.,]\d+)?', s)
+    if not m:
+        return None, ''
+    raw = m.group(0).replace(' ', '').replace('\u202f', '').replace(',', '.')
+    try:
+        num = float(raw)
+    except ValueError:
+        return None, ''
+    suffix = s[m.end():].strip()[:4]
+    return num, suffix
+
+
+def _chart_area_transparent(chart):
+    """
+    Force le fond du chart-space et du plot area à transparent,
+    pour que le chart s'intègre visuellement au fond sombre de la slide.
+    """
+    chart_space = chart._chartSpace
+    # 1) chartSpace > spPr
+    spPr = chart_space.find(qn('c:spPr'))
+    if spPr is None:
+        spPr = etree.SubElement(chart_space, qn('c:spPr'))
+    for child in list(spPr):
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag in ('solidFill', 'gradFill', 'pattFill', 'blipFill', 'noFill', 'ln'):
+            spPr.remove(child)
+    etree.SubElement(spPr, f'{{{_DML_NS}}}noFill')
+    ln = etree.SubElement(spPr, f'{{{_DML_NS}}}ln')
+    etree.SubElement(ln, f'{{{_DML_NS}}}noFill')
+
+    # 2) plotArea > spPr
+    plotArea = chart_space.find('.//' + qn('c:plotArea'))
+    if plotArea is not None:
+        plotSpPr = plotArea.find(qn('c:spPr'))
+        if plotSpPr is None:
+            plotSpPr = etree.SubElement(plotArea, qn('c:spPr'))
+        for child in list(plotSpPr):
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if tag in ('solidFill', 'gradFill', 'pattFill', 'blipFill', 'noFill', 'ln'):
+                plotSpPr.remove(child)
+        etree.SubElement(plotSpPr, f'{{{_DML_NS}}}noFill')
+
+
+def _make_progress_slide(prs, title: str, stats: list, section_label: str = ''):
+    """
+    Slide stats en barres de progression horizontales (track + remplissage).
+    Déclenchée quand 1 à 4 stats sont TOUTES en pourcentage (0-100%).
+    Retourne None sinon — le caller doit alors essayer un autre rendu
+    (chart natif ou cartes texte).
+
+    Lecture visuelle immédiate : chaque barre montre "où on en est sur 100".
+    Plus expressif qu'un bar chart pour les %, car la barre évoque la jauge
+    « remplie / vide ».
+    """
+    if not stats:
+        return None
+
+    parsed = []
+    for stat in stats[:4]:
+        num, suffix = _parse_numeric(stat.get('valeur', ''))
+        if num is None or suffix != '%' or not (0 <= num <= 100):
+            # Règle stricte : on ne mélange pas des stats % et non-%,
+            # sinon la métaphore « barre 0-100 » n'a plus de sens.
+            return None
+        parsed.append({'num': num, 'label': str(stat.get('label', ''))})
+
+    if not parsed:
+        return None
+
+    n = len(parsed)
+    slide = _content_base(prs, title, section_label)
+
+    # En-tête (titre + trait accent) — aligné sur les autres slides stat/chart
+    top_title = 0.5 if section_label else 0.18
+    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    # Zone de contenu : entre le trait accent et la zone pied de page.
+    # Footer est à y=7.30 → on se limite à 7.15 pour respirer.
+    body_top = sep_top + 0.45
+    body_bot = 7.15
+    body_h   = body_bot - body_top
+    row_h    = body_h / n
+
+    # Tailles adaptatives (plus n est petit, plus on grossit)
+    if n == 1:
+        label_pt, value_pt, bar_h = 18, 52, 0.50
+    elif n == 2:
+        label_pt, value_pt, bar_h = 16, 40, 0.42
+    else:
+        label_pt, value_pt, bar_h = 14, 28, 0.32
+
+    # Géométrie horizontale
+    side_pad   = 0.22
+    track_left = side_pad
+    track_w    = 13.33 - 2 * side_pad   # ~12.89"
+
+    for i, item in enumerate(parsed):
+        num   = item['num']
+        label = item['label']
+
+        row_center = body_top + (i + 0.5) * row_h
+        # On place : label + valeur sur une ligne, puis barre juste dessous.
+        # Le couple (texte / barre) est centré verticalement dans la row.
+        text_h = max(label_pt, value_pt) / 72.0 + 0.10  # hauteur approx. en pouces
+        block_h = text_h + 0.12 + bar_h
+        block_top = row_center - block_h / 2
+
+        # --- Label à gauche ---
+        tb_lbl = _tb(slide, track_left, block_top, track_w * 0.72, text_h)
+        tf_l = tb_lbl.text_frame
+        tf_l.word_wrap = True
+        pl = tf_l.paragraphs[0]
+        pl.alignment = PP_ALIGN.LEFT
+        _add_runs(pl, _truncate(label, 80), label_pt, C_TEXT_LIGHT,
+                  base_bold=True, font=FONT_BODY)
+
+        # --- Valeur à droite (aligné à la fin de la barre) ---
+        val_w = track_w * 0.26
+        val_left = track_left + track_w - val_w
+        tb_val = _tb(slide, val_left, block_top, val_w, text_h)
+        tf_v = tb_val.text_frame
+        pv = tf_v.paragraphs[0]
+        pv.alignment = PP_ALIGN.RIGHT
+        val_text = f"{num:g}%"
+        run_v = pv.add_run()
+        run_v.text = val_text
+        _run_fmt(run_v, value_pt, C_ACCENT2, bold=True, font=FONT_DISPLAY)
+
+        # --- Track (fond de la barre, pleine largeur) ---
+        bar_top = block_top + text_h + 0.12
+        track = _rounded_rect(slide, track_left, bar_top, track_w, bar_h,
+                              C_ACCENT_DARK)
+        _fill_gradient(track, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)],
+                       angle_deg=90)
+
+        # --- Fill (remplissage proportionnel) ---
+        # Minimum visible pour qu'à 0% on voie tout de même un embryon de barre.
+        fill_w = max(track_w * (num / 100.0), 0.05) if num > 0 else 0
+        if fill_w > 0:
+            fill = _rounded_rect(slide, track_left, bar_top, fill_w, bar_h,
+                                 C_ACCENT)
+            _fill_gradient(fill, [(0, C_ACCENT), (100, C_ACCENT2)],
+                           angle_deg=0)
+            _add_shadow(fill, blur_pt=8, dist_pt=2, alpha_pct=45, dir_deg=90)
+
+    return slide
+
+
+def _make_stat_chart_slide(prs, title: str, stats: list, section_label: str = ''):
+    """
+    Slide stats avec graphique natif (bar chart horizontal) sur fond sombre.
+    Retourne None si moins de 2 valeurs numériques — le caller doit alors
+    retomber sur _make_stat_slide (cartes texte).
+    """
+    parsed = []
+    for stat in stats[:6]:
+        num, suffix = _parse_numeric(stat.get('valeur', ''))
+        if num is None:
+            continue
+        parsed.append({
+            'num': num,
+            'suffix': suffix,
+            'label': str(stat.get('label', '')),
+        })
+    if len(parsed) < 2:
+        return None
+
+    slide = _content_base(prs, title, section_label)
+
+    top_title = 0.5 if section_label else 0.18
+    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    # BAR_CLUSTERED affiche la 1ère catégorie en bas : on inverse pour afficher
+    # le 1er stat en haut (lecture naturelle).
+    ordered = list(reversed(parsed))
+    chart_data = CategoryChartData()
+    chart_data.categories = [_truncate(p['label'], 45) for p in ordered]
+    chart_data.add_series('Valeur', [p['num'] for p in ordered])
+
+    # Format numérique : % si tous les suffixes sont %, sinon nombre brut
+    suffixes = {p['suffix'] for p in parsed}
+    if suffixes == {'%'}:
+        num_format = '0"%"'
+    else:
+        num_format = '0'
+
+    chart_top = sep_top + 0.35
+    chart_h   = 7.5 - chart_top - 0.55   # marge pour le footer
+    gframe = slide.shapes.add_chart(
+        XL_CHART_TYPE.BAR_CLUSTERED,
+        Inches(0.35), Inches(chart_top),
+        Inches(12.6), Inches(chart_h),
+        chart_data,
+    )
+    chart = gframe.chart
+
+    chart.has_title  = False
+    chart.has_legend = False
+
+    # Labels de données en bout de barre
+    plot = chart.plots[0]
+    plot.has_data_labels = True
+    dlbl = plot.data_labels
+    dlbl.show_value = True
+    dlbl.number_format = num_format
+    dlbl.position = XL_LABEL_POSITION.OUTSIDE_END
+    dlbl.font.size = Pt(14)
+    dlbl.font.bold = True
+    dlbl.font.color.rgb = C_WHITE
+    dlbl.font.name = FONT_DISPLAY
+
+    # Couleur des barres (accent violet) + pas de bordure
+    series = plot.series[0]
+    series.format.fill.solid()
+    series.format.fill.fore_color.rgb = C_ACCENT
+    series.format.line.fill.background()
+
+    # Axe catégories (labels textuels à gauche des barres)
+    try:
+        cat_ax = chart.category_axis
+        cat_ax.tick_labels.font.size = Pt(12)
+        cat_ax.tick_labels.font.color.rgb = C_TEXT_LIGHT
+        cat_ax.tick_labels.font.name = FONT_BODY
+        cat_ax.format.line.fill.background()
+    except Exception:
+        pass
+
+    # Axe des valeurs (bas) : masqué
+    try:
+        chart.value_axis.visible = False
+    except Exception:
+        pass
+
+    # Fond chart+plot transparent pour se fondre au slide
+    _chart_area_transparent(chart)
+
+    return slide
+
 
 def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''):
     """Slide stat-callout : statistiques en grands nombres sur fond de cartes."""
@@ -634,7 +1089,7 @@ def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -647,7 +1102,9 @@ def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''
 
     for i, stat in enumerate(stats[:4]):
         lx = 0.22 + i * card_w
-        _rounded_rect(slide, lx + 0.12, body_top, card_w - 0.25, 3.8, C_ACCENT_DARK)
+        card = _rounded_rect(slide, lx + 0.12, body_top, card_w - 0.25, 3.8, C_ACCENT_DARK)
+        _fill_gradient(card, [(0, C_ACCENT_MID), (100, C_ACCENT_DARK)], angle_deg=135)
+        _add_shadow(card, blur_pt=12, dist_pt=4, alpha_pct=50, dir_deg=90)
 
         # Valeur
         tb_val = _tb(slide, lx + 0.12, body_top + 0.5, card_w - 0.25, 1.8)
@@ -656,7 +1113,7 @@ def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''
         pv.alignment = PP_ALIGN.CENTER
         run_v = pv.add_run()
         run_v.text = str(stat.get('valeur', ''))
-        _run_fmt(run_v, 44, C_ACCENT2, bold=True)
+        _run_fmt(run_v, 44, C_ACCENT2, bold=True, font=FONT_DISPLAY)
 
         # Label
         tb_lbl = _tb(slide, lx + 0.12, body_top + 2.5, card_w - 0.25, 1.1)
@@ -679,12 +1136,12 @@ def _make_two_column_text_slide(prs, title: str, left_text: str, right_text: str
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
     body_top = sep_top + 0.18
-    body_h   = 7.5 - body_top - 0.15
+    body_h   = 7.5 - body_top - 0.35
 
     _rect(slide, 6.8, body_top, 0.02, body_h, C_ACCENT_MID)
 
@@ -711,7 +1168,7 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    _add_runs(p, title, 24, C_WHITE, base_bold=True)
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -737,7 +1194,9 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
 
     for i, el in enumerate(elements[:7]):
         lx = start_x + i * (elem_w + arrow_w)
-        _rounded_rect(slide, lx, elem_top, elem_w, 1.0, C_ACCENT_MID)
+        box = _rounded_rect(slide, lx, elem_top, elem_w, 1.0, C_ACCENT_MID)
+        _fill_gradient(box, [(0, C_ACCENT_MID), (100, C_ACCENT_DARK)], angle_deg=90)
+        _add_shadow(box, blur_pt=10, dist_pt=3, alpha_pct=45, dir_deg=90)
         tb = _tb(slide, lx, elem_top, elem_w, 1.0)
         tf = tb.text_frame
         tf.word_wrap = True
@@ -752,7 +1211,7 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
             pa.alignment = PP_ALIGN.CENTER
             run_a = pa.add_run()
             run_a.text = '→'
-            _run_fmt(run_a, 18, C_ACCENT2, bold=True)
+            _run_fmt(run_a, 18, C_ACCENT2, bold=True, font=FONT_DISPLAY)
 
     return slide
 
@@ -793,6 +1252,35 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             _make_section_slide(prs, titre)
             continue
 
+        # ── Layouts spécialisés détectés par mot-clé du titre (parité V1) ───
+        # Route vers _make_definitions_slide / _make_key_points_slide avec
+        # fallback sur le dispatch normal si le contenu n'est pas exploitable.
+        titre_lower = titre.lower()
+        SEC_DEF_KW = ('définitions des concepts clés', 'définitions', 'concepts clés')
+        SEC_PTS_KW = ('points importants à retenir', 'points importants',
+                      'points clés', 'à retenir')
+
+        if layout in ('bullets', 'two-column'):
+            items_raw = contenu.get('items') or []
+            if not items_raw:
+                left  = str(contenu.get('colonne_gauche', '') or '')
+                right = str(contenu.get('colonne_droite', '') or '')
+                items_raw = _extract_bullets(left + '\n' + right, 20)
+
+            if items_raw and any(kw in titre_lower for kw in SEC_DEF_KW):
+                full_text = '\n'.join(f'- {it}' for it in items_raw)
+                defs = _parse_definitions(full_text)
+                if defs:
+                    _make_definitions_slide(prs, defs)
+                    continue
+                # Sinon : on laisse tomber et on fallback sur le dispatch normal
+
+            if items_raw and any(kw in titre_lower for kw in SEC_PTS_KW):
+                points = [_clean(str(it)) for it in items_raw if str(it).strip()]
+                if points:
+                    _make_key_points_slide(prs, points[:12])
+                    continue
+
         # ── Slides de contenu selon layout ──────────────────────────────────
         if layout == 'bullets':
             items = contenu.get('items', [])
@@ -817,7 +1305,12 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
         elif layout == 'stat-callout':
             stats = contenu.get('stats', [])
             if stats:
-                _make_stat_slide(prs, titre, stats)
+                # Priorité : 1) barres de progression si toutes les valeurs sont
+                # des % entre 0 et 100 (métaphore jauge), 2) bar chart natif si
+                # ≥ 2 numériques, 3) cartes texte en dernier recours.
+                if _make_progress_slide(prs, titre, stats) is None:
+                    if _make_stat_chart_slide(prs, titre, stats) is None:
+                        _make_stat_slide(prs, titre, stats)
 
         elif layout == 'schema':
             description = str(contenu.get('description_schema', '') or '')
@@ -829,6 +1322,9 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             fallback = [str(v) for v in contenu.values() if v][:8]
             if fallback:
                 _make_content_slide(prs, titre, fallback, is_bullets=True)
+
+    # Pied de page sur toutes les slides sauf la titre
+    _apply_footers(prs, module, chapitre)
 
     buf = BytesIO()
     prs.save(buf)
@@ -940,6 +1436,9 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                     para = _first_paragraph(section_body)
                     if para:
                         _make_content_slide(prs, h2_title, _wrap_text(para, 95), is_bullets=False)
+
+    # Pied de page sur toutes les slides sauf la titre
+    _apply_footers(prs, module, chapitre)
 
     buf = BytesIO()
     prs.save(buf)
