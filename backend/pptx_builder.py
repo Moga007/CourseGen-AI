@@ -65,6 +65,18 @@ CHIP_SCHEMA  = '◉'   # schéma / relations entre éléments
 CHIP_COMPARE = '⇌'   # comparaison (deux colonnes)
 CHIP_TABLE   = '▦'   # tableau de données
 
+# Motif de fond subtil (appliqué à toutes les slides de contenu via _content_base).
+# Presets DrawingML les plus adaptés à un fond sombre :
+#   'smGrid'    : grille fine (aspect technique/académique)
+#   'dotGrid'   : grille de points (le plus discret)
+#   'ltDnDiag'  : diagonales fines descendantes (aspect « papier »)
+#   'trellis'   : motif tressé léger
+# Alpha en % : 3-6 pour rester quasi-invisible sans écraser le texte.
+BG_PATTERN_ENABLED = True
+BG_PATTERN_PRESET  = 'dotGrid'
+BG_PATTERN_COLOR   = RGBColor(0x81, 0x8C, 0xF8)  # C_ACCENT2 (clair → plus visible sur fond sombre)
+BG_PATTERN_ALPHA   = 5    # %
+
 
 # ═══════════════════════════════════════════════════════
 #  UTILITAIRES MARKDOWN
@@ -318,6 +330,52 @@ def _add_transparent_rect(slide, left, top, width, height, color: RGBColor, opac
 
 
 _DML_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+
+
+def _add_pattern_overlay(slide, preset: str = None, fg_color: RGBColor = None,
+                         fg_alpha_pct: int = None):
+    """
+    Motif de fond subtil pleine-slide (pattFill DrawingML natif).
+
+    Crée un rectangle pleine-slide rempli d'un motif preset (dotGrid, smGrid,
+    ltDnDiag, etc.) avec fond transparent et avant-plan très peu opaque pour
+    donner une texture discrète sans écraser le contenu. La forme est posée
+    en premier donc tous les appels suivants de _content_base passent au-dessus.
+    """
+    preset = preset or BG_PATTERN_PRESET
+    fg_color = fg_color or BG_PATTERN_COLOR
+    alpha = BG_PATTERN_ALPHA if fg_alpha_pct is None else fg_alpha_pct
+
+    s = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.33), Inches(7.5))
+    _no_line(s)
+
+    sp = s._element
+    spPr = sp.find(qn('p:spPr'))
+    if spPr is None:
+        return s
+    # Supprimer tout fill existant pour y poser notre pattFill
+    for child in list(spPr):
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag in ('solidFill', 'gradFill', 'pattFill', 'noFill', 'blipFill'):
+            spPr.remove(child)
+    # Neutraliser le p:style du shape (sinon fillRef du thème surcharge notre pattFill)
+    style = sp.find(qn('p:style'))
+    if style is not None:
+        sp.remove(style)
+
+    patt = etree.SubElement(spPr, f'{{{_DML_NS}}}pattFill')
+    patt.set('prst', preset)
+    fg = etree.SubElement(patt, f'{{{_DML_NS}}}fgClr')
+    fg_srgb = etree.SubElement(fg, f'{{{_DML_NS}}}srgbClr')
+    fg_srgb.set('val', f'{fg_color[0]:02X}{fg_color[1]:02X}{fg_color[2]:02X}')
+    fg_alpha = etree.SubElement(fg_srgb, f'{{{_DML_NS}}}alpha')
+    fg_alpha.set('val', str(int(alpha * 1000)))
+    bg = etree.SubElement(patt, f'{{{_DML_NS}}}bgClr')
+    bg_srgb = etree.SubElement(bg, f'{{{_DML_NS}}}srgbClr')
+    bg_srgb.set('val', '000000')
+    bg_alpha = etree.SubElement(bg_srgb, f'{{{_DML_NS}}}alpha')
+    bg_alpha.set('val', '0')  # fond du pattern totalement transparent
+    return s
 
 
 def _fill_gradient(shape, stops: list, angle_deg: float = 90.0):
@@ -641,6 +699,10 @@ def _content_base(prs, title: str, section_label: str = ''):
     """Crée la structure de base d'une slide de contenu (fond + déco)."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_bg(slide, C_BG_CARD)
+
+    # Motif de fond subtil (première forme = sous tout le reste dans la z-order)
+    if BG_PATTERN_ENABLED:
+        _add_pattern_overlay(slide)
 
     # Barre gauche accent
     _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
