@@ -13,6 +13,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.oxml.ns import qn
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from lxml import etree
 
 # ═══════════════════════════════════════════════════════
@@ -441,6 +442,28 @@ def _add_pattern_overlay(slide, preset: str = None, fg_color: RGBColor = None,
     return s
 
 
+def _add_slide_hyperlink(run, source_slide, target_slide):
+    """
+    Ajoute un hyperlien interne (saut vers une autre slide) sur un run de texte.
+
+    Crée (ou réutilise) une relation de type 'slide' entre la slide source et
+    la slide cible, puis injecte un <a:hlinkClick> dans les propriétés du run
+    avec l'action ppaction://hlinksldjump qui indique à PowerPoint d'exécuter
+    un saut de slide au clic.
+    """
+    if target_slide is None or source_slide is None:
+        return
+    rId = source_slide.part.relate_to(target_slide.part, RT.SLIDE)
+
+    rPr = run._r.get_or_add_rPr()
+    # Supprime un hlinkClick antérieur éventuel (évite les doublons)
+    for existing in rPr.findall(qn('a:hlinkClick')):
+        rPr.remove(existing)
+    hlink = etree.SubElement(rPr, qn('a:hlinkClick'))
+    hlink.set(qn('r:id'), rId)
+    hlink.set('action', 'ppaction://hlinksldjump')
+
+
 def _fill_gradient(shape, stops: list, angle_deg: float = 90.0):
     """
     Applique un gradient linéaire. stops = [(pos_0_100, RGBColor), ...].
@@ -752,6 +775,188 @@ def _make_section_slide(prs, title: str, numero: int = 0):
     p.alignment = PP_ALIGN.LEFT
 
     return slide
+
+
+# ═══════════════════════════════════════════════════════
+#  SLIDE SOMMAIRE (TOC cliquable)
+# ═══════════════════════════════════════════════════════
+
+def _make_toc_placeholder(prs):
+    """
+    Crée une slide vide « sommaire » juste après la slide titre.
+    Sera remplie plus tard via _fill_toc_slide une fois que les slides de
+    section ont été créées (pour pouvoir les référencer en hyperlien).
+    """
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_bg(slide, C_BG_CARD)
+    if BG_PATTERN_ENABLED:
+        _add_pattern_overlay(slide)
+
+    # Barres décoratives identiques aux slides de contenu
+    _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
+    _rect(slide, 0.09, 0, 13.24, 0.05, C_ACCENT_MID)
+    return slide
+
+
+def _fill_toc_slide(slide, entries: list):
+    """
+    Remplit la slide sommaire : titre « Sommaire » + liste numérotée d'entrées
+    cliquables. entries = [(titre_section, slide_cible_ou_None), ...].
+
+    Mise en page adaptative :
+      - ≤ 8 entrées : une colonne, taille de police élevée
+      - 9-16 entrées : deux colonnes
+      - > 16 : tronqué à 16
+    """
+    if not entries:
+        return
+    entries = entries[:16]
+    n = len(entries)
+
+    # ── Titre "Sommaire"
+    tb_title = _tb(slide, 0.22, 0.35, 12.9, 1.0)
+    tf_t = tb_title.text_frame
+    tf_t.word_wrap = True
+    p_t = tf_t.paragraphs[0]
+    _add_runs(p_t, "Sommaire", 34, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    # Sous-titre discret
+    tb_sub = _tb(slide, 0.22, 1.10, 12.9, 0.35)
+    p_sub = tb_sub.text_frame.paragraphs[0]
+    run_sub = p_sub.add_run()
+    run_sub.text = f"{n} section{'s' if n > 1 else ''} · cliquez pour y accéder"
+    _run_fmt(run_sub, 11, C_TEXT_MUTED, font=FONT_BODY)
+
+    # Séparateur
+    _rect(slide, 0.22, 1.55, 2.8, 0.05, C_ACCENT)
+
+    body_top = 1.95
+    body_h   = 5.10
+
+    if n <= 8:
+        # Une colonne centrale
+        col_x  = 0.9
+        col_w  = 11.5
+        entry_h = body_h / n
+        # Police adaptative : 22pt pour 3 entrées → 15pt pour 8
+        font_size = max(14, int(22 - (n - 3) * 1.2)) if n >= 3 else 22
+        for i, (titre, target) in enumerate(entries):
+            y = body_top + i * entry_h
+            _draw_toc_entry(slide, col_x, y, col_w, entry_h, i + 1, titre,
+                            target, font_size=font_size)
+    else:
+        # Deux colonnes
+        per_col = (n + 1) // 2
+        col_w   = 6.1
+        gap     = 0.35
+        start_x = (13.33 - (2 * col_w + gap)) / 2
+        entry_h = body_h / per_col
+        font_size = 13
+        for i, (titre, target) in enumerate(entries):
+            col = i // per_col
+            row = i % per_col
+            x = start_x + col * (col_w + gap)
+            y = body_top + row * entry_h
+            _draw_toc_entry(slide, x, y, col_w, entry_h, i + 1, titre,
+                            target, font_size=font_size)
+
+
+def _draw_toc_entry(slide, x: float, y: float, w: float, h: float,
+                    numero: int, titre: str, target_slide,
+                    font_size: int = 18):
+    """
+    Dessine une ligne de sommaire : chip numéro romain + titre cliquable.
+    target_slide peut être None (entrée non-cliquable, fallback gracieux).
+    """
+    # Chip avec le chiffre romain
+    chip_diam = min(0.55, h * 0.72)
+    chip_y    = y + (h - chip_diam) / 2
+    roman     = (CHIFFRES_ROMAINS[numero - 1]
+                 if 1 <= numero <= len(CHIFFRES_ROMAINS) else str(numero))
+    _icon_chip(slide, x, chip_y, chip_diam, roman, bg_color=C_ACCENT,
+               glyph_size_pt=max(11, int(chip_diam * 22)))
+
+    # Titre à droite du chip
+    text_left = x + chip_diam + 0.22
+    text_w    = w - (chip_diam + 0.22)
+    tb = _tb(slide, text_left, y, text_w, h)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    tf.margin_left   = Inches(0.04)
+    tf.margin_right  = Inches(0.04)
+    tf.margin_top    = Inches(0)
+    tf.margin_bottom = Inches(0)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+    p = tf.paragraphs[0]
+    run = p.add_run()
+    run.text = _truncate(titre, 80)
+    _run_fmt(run, font_size, C_TEXT_LIGHT, bold=True, font=FONT_DISPLAY)
+
+    if target_slide is not None:
+        _add_slide_hyperlink(run, slide, target_slide)
+        # Indicateur visuel discret « → » à droite pour signaler la cliquabilité
+        tb_arrow = _tb(slide, x + w - 0.45, y, 0.4, h)
+        tf_a = tb_arrow.text_frame
+        tf_a.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf_a.margin_left = tf_a.margin_right = Inches(0)
+        p_a = tf_a.paragraphs[0]
+        p_a.alignment = PP_ALIGN.RIGHT
+        run_a = p_a.add_run()
+        run_a.text = '→'
+        _run_fmt(run_a, max(12, font_size - 2), C_ACCENT2, bold=False,
+                 font=FONT_DISPLAY)
+        # L'icône elle aussi pointe vers la même cible (plus cliquable)
+        _add_slide_hyperlink(run_a, slide, target_slide)
+
+
+def _move_slide_to(prs, slide, new_index: int):
+    """
+    Déplace une slide dans le sldIdLst pour changer son ordre d'apparition.
+    Utilisé pour positionner la slide sommaire juste après la slide titre.
+    """
+    sldIdLst = prs.slides._sldIdLst
+    # Récupère le <p:sldId> correspondant à notre slide via r:id
+    target_rId = None
+    for rel in prs.part.rels.values():
+        if rel.target_part is slide.part:
+            target_rId = rel.rId
+            break
+    if target_rId is None:
+        return
+    target_sldId = None
+    for sldId in list(sldIdLst):
+        if sldId.get(qn('r:id')) == target_rId:
+            target_sldId = sldId
+            break
+    if target_sldId is None:
+        return
+    sldIdLst.remove(target_sldId)
+    sldIdLst.insert(new_index, target_sldId)
+
+
+def _remove_slide(prs, slide):
+    """
+    Supprime une slide du deck : retire l'entrée <p:sldId> du sldIdLst et
+    détache la relation vers la part du slide. La part elle-même reste dans
+    le package mais n'est plus référencée (sera ignorée par PowerPoint).
+    """
+    sldIdLst = prs.slides._sldIdLst
+    target_rId = None
+    for rel in list(prs.part.rels.values()):
+        if rel.target_part is slide.part:
+            target_rId = rel.rId
+            break
+    if target_rId is None:
+        return
+    for sldId in list(sldIdLst):
+        if sldId.get(qn('r:id')) == target_rId:
+            sldIdLst.remove(sldId)
+            break
+    try:
+        prs.part.drop_rel(target_rId)
+    except KeyError:
+        pass
 
 
 # ═══════════════════════════════════════════════════════
@@ -1619,6 +1824,13 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
     slides = slides_json.get('slides', [])
     title_done = False
 
+    # Sommaire cliquable : placeholder créé juste après la slide titre.
+    # Rempli à la fin une fois les slides de section référencées disponibles.
+    toc_slide = None
+    toc_entries = []  # [(titre_section, slide_section), ...]
+
+    section_counter_v2 = 0
+
     for slide_data in slides:
         slide_type = slide_data.get('type', 'content')
         layout     = slide_data.get('layout', 'bullets')
@@ -1630,12 +1842,17 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             _make_title_slide(prs, specialite, module, chapitre, niveau,
                               title_image=title_image, photographer=photographer)
             title_done = True
+            # Crée le placeholder du sommaire juste après le titre
+            if toc_slide is None:
+                toc_slide = _make_toc_placeholder(prs)
             if slide_type == 'title':
                 continue
 
         # ── Slide section ────────────────────────────────────────────────────
         if slide_type == 'section':
-            _make_section_slide(prs, titre)
+            section_counter_v2 += 1
+            _make_section_slide(prs, titre, numero=section_counter_v2)
+            toc_entries.append((titre, prs.slides[-1]))
             continue
 
         # ── Layouts spécialisés détectés par mot-clé du titre (parité V1) ───
@@ -1743,6 +1960,13 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if fallback:
                 _make_content_slide(prs, titre, fallback, is_bullets=True)
 
+    # Remplit ou supprime la slide sommaire selon le nombre de sections captées
+    if toc_slide is not None:
+        if len(toc_entries) >= 2:
+            _fill_toc_slide(toc_slide, toc_entries)
+        else:
+            _remove_slide(prs, toc_slide)
+
     # Pied de page sur toutes les slides sauf la titre
     _apply_footers(prs, module, chapitre)
 
@@ -1764,6 +1988,11 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
 
     _make_title_slide(prs, specialite, module, chapitre, niveau,
                       title_image=title_image, photographer=photographer)
+
+    # Sommaire cliquable : créé comme placeholder juste après la titre, rempli
+    # à la fin une fois que toutes les slides de section ont été créées.
+    toc_slide = _make_toc_placeholder(prs)
+    toc_entries = []  # [(titre_section, première_slide_de_la_section), ...]
 
     SKIP      = {'tableau comparatif', 'synthèse visuelle', 'pour aller plus loin'}
     SEC_DEF   = {'définitions des concepts clés', 'définitions'}
@@ -1791,10 +2020,20 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
         if any(kw in h2_lower for kw in SKIP):
             continue
 
+        # Snapshot avant rendu : permet ensuite de capter la 1re slide générée
+        # pour cette section et de l'ajouter au sommaire cliquable.
+        _slides_before = len(prs.slides)
+
+        def _record_toc():
+            """Ajoute l'entrée au sommaire si au moins une slide a été créée."""
+            if len(prs.slides) > _slides_before:
+                toc_entries.append((h2_title, prs.slides[_slides_before]))
+
         if any(kw in h2_lower for kw in SEC_DEF):
             items = _parse_definitions(section_body)
             if items:
                 _make_definitions_slide(prs, items)
+            _record_toc()
             continue
 
         if any(kw in h2_lower for kw in SEC_PTS):
@@ -1803,6 +2042,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                 points = _wrap_text(_first_paragraph(section_body), 120)
             if points:
                 _make_key_points_slide(prs, points)
+            _record_toc()
             continue
 
         if any(kw in h2_lower for kw in SEC_CALLOUT):
@@ -1812,6 +2052,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                 quote = _first_paragraph(section_body)
             if quote:
                 _make_callout_slide(prs, quote, attribution)
+            _record_toc()
             continue
 
         # Auto-détection : section dont le corps est exclusivement un blockquote
@@ -1820,6 +2061,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             quote, attribution = _parse_blockquote(section_body)
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=h2_title)
+                _record_toc()
                 continue
 
         # Stepper : titre déclencheur OU contenu principalement en liste numérotée
@@ -1827,6 +2069,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             steps = _parse_steps(section_body)
             if len(steps) >= 2:
                 if _make_stepper_slide(prs, h2_title, steps) is not None:
+                    _record_toc()
                     continue
             # Sinon, on retombe sur le dispatch classique ci-dessous
 
@@ -1888,6 +2131,15 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                     para = _first_paragraph(section_body)
                     if para:
                         _make_content_slide(prs, h2_title, _wrap_text(para, 95), is_bullets=False)
+
+        # Fin du bloc par fall-through (section slide + subsections / bullets)
+        _record_toc()
+
+    # Remplit ou supprime la slide sommaire selon les entrées collectées
+    if len(toc_entries) >= 2:
+        _fill_toc_slide(toc_slide, toc_entries)
+    else:
+        _remove_slide(prs, toc_slide)
 
     # Pied de page sur toutes les slides sauf la titre
     _apply_footers(prs, module, chapitre)
