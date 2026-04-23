@@ -457,33 +457,69 @@ async def generate_slides(request: SlidesRequest):
     return SlidesResponse(editor_url=editor_url, slides_prompt=slides_prompt)
 
 
-async def _fetch_unsplash_image(query: str) -> tuple:
-    """Récupère une image Unsplash. Retourne (None, None) en cas d'échec."""
+_UNSPLASH_GENERIC_FALLBACKS = [
+    "business abstract",
+    "education modern",
+    "abstract gradient",
+]
+
+
+async def _fetch_unsplash_image(*queries: str) -> tuple:
+    """
+    Récupère une image Unsplash en essayant plusieurs requêtes en cascade.
+
+    L'endpoint `/photos/random?query=...` d'Unsplash fait un AND strict sur
+    tous les mots de la requête : des combinaisons très spécifiques (ex :
+    'MCD Innovation marketing et disruption') renvoient un 404 'No photos
+    found'. On teste donc plusieurs formulations de la plus spécifique à la
+    plus générique, en s'arrêtant à la première qui retourne une image.
+
+    Retourne (image_bytes, photographer_name) ou (None, None) si aucune
+    requête ne donne de résultat.
+    """
     api_key = os.getenv("UNSPLASH_ACCESS_KEY", "")
     if not api_key or api_key == "votre_cle_unsplash_ici":
         return None, None
+
+    # Déduplique en préservant l'ordre ; vire les vides et ajoute les fallbacks
+    tried: list[str] = []
+    for q in list(queries) + _UNSPLASH_GENERIC_FALLBACKS:
+        q = (q or "").strip()
+        if q and q not in tried:
+            tried.append(q)
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.unsplash.com/photos/random",
-                params={"query": query, "orientation": "landscape"},
-                headers={"Authorization": f"Client-ID {api_key}"},
-            )
-            if resp.status_code != 200:
-                return None, None
-            data = resp.json()
-            img_resp = await client.get(data["urls"]["regular"], timeout=15.0)
-            if img_resp.status_code != 200:
-                return None, None
-            return img_resp.content, data["user"]["name"]
+            for q in tried:
+                resp = await client.get(
+                    "https://api.unsplash.com/photos/random",
+                    params={"query": q, "orientation": "landscape"},
+                    headers={"Authorization": f"Client-ID {api_key}"},
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                img_url = data.get("urls", {}).get("regular")
+                if not img_url:
+                    continue
+                img_resp = await client.get(img_url, timeout=15.0)
+                if img_resp.status_code != 200:
+                    continue
+                return img_resp.content, data.get("user", {}).get("name", "")
     except Exception:
-        return None, None
+        pass
+    return None, None
 
 
 @app.post("/generate-pptx")
 @limiter.limit("20/minute")
 async def generate_pptx(request: Request, body: PptxRequest):
-    image_bytes, photographer = await _fetch_unsplash_image(f"{body.specialite} {body.chapitre}")
+    image_bytes, photographer = await _fetch_unsplash_image(
+        body.chapitre,                              # plus spécifique (le topic)
+        f"{body.specialite} {body.chapitre}",       # combinaison
+        body.specialite,                            # spécialité seule
+        body.module,                                # module seul en dernier
+    )
 
     try:
         pptx_bytes = markdown_to_pptx(
@@ -579,7 +615,10 @@ async def get_historique(
 async def generate_v2_pptx(request: PptxV2Request):
     """Génère un PPTX depuis le slides_json de l'Agent Designer (pipeline V2)."""
     image_bytes, photographer = await _fetch_unsplash_image(
-        f"{request.specialite} {request.chapitre}"
+        request.chapitre,
+        f"{request.specialite} {request.chapitre}",
+        request.specialite,
+        request.module,
     )
     try:
         pptx_bytes = slides_json_to_pptx(
