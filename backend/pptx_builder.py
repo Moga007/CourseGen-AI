@@ -64,6 +64,7 @@ CHIP_STATS   = '%'   # statistiques / chiffres clés
 CHIP_SCHEMA  = '◉'   # schéma / relations entre éléments
 CHIP_COMPARE = '⇌'   # comparaison (deux colonnes)
 CHIP_TABLE   = '▦'   # tableau de données
+CHIP_STEPS   = '⇣'   # processus séquentiel / stepper vertical
 
 # Motif de fond subtil (appliqué à toutes les slides de contenu via _content_base).
 # Presets DrawingML les plus adaptés à un fond sombre :
@@ -237,6 +238,68 @@ def _is_pure_blockquote(text: str) -> bool:
         else:
             return False
     return has_quote
+
+
+def _parse_steps(text: str) -> list[dict]:
+    """
+    Parse une liste numérotée markdown en étapes structurées (stepper).
+
+    Formats supportés :
+        1. **Titre de l'étape** : description...
+        2. **Titre** : description multi-lignes
+           qui continue ici.
+        3. Titre sans gras — description éventuelle
+        4. Ligne unique
+
+    Retourne [{'titre': str, 'description': str}, ...] (dans l'ordre du doc).
+    """
+    steps = []
+    current = None
+    for raw in text.split('\n'):
+        line = raw.strip()
+        m = re.match(r'^\d+\.\s+(.*)', line)
+        if m:
+            if current:
+                steps.append(current)
+            body = m.group(1).strip()
+            # Pattern principal : **Titre** : description
+            mb = re.match(r'^\*\*(.+?)\*\*\s*[:：\-–]?\s*(.*)', body)
+            if mb:
+                titre = _clean(mb.group(1))
+                desc  = _clean(mb.group(2)) if mb.group(2) else ''
+            elif ':' in body:
+                tit, desc = body.split(':', 1)
+                titre, desc = _clean(tit), _clean(desc)
+            elif ' — ' in body or ' – ' in body:
+                sep = ' — ' if ' — ' in body else ' – '
+                tit, desc = body.split(sep, 1)
+                titre, desc = _clean(tit), _clean(desc)
+            else:
+                titre, desc = _clean(body), ''
+            current = {'titre': titre, 'description': desc}
+        elif current and line and not line.startswith('#') and not line.startswith('-'):
+            # Continuation de la description précédente
+            current['description'] = (current['description'] + ' ' + _clean(line)).strip()
+    if current:
+        steps.append(current)
+    return steps
+
+
+def _looks_like_steps(text: str) -> bool:
+    """
+    Heuristique : True si le contenu est une liste numérotée de 3-8 étapes
+    qui domine le texte (pour auto-détection stepper).
+    """
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    if not lines:
+        return False
+    numbered = sum(1 for l in lines if re.match(r'^\d+\.\s', l))
+    if not (3 <= numbered <= 8):
+        return False
+    # Première ligne non vide doit être une étape numérotée (pas un paragraphe d'intro)
+    if not re.match(r'^\d+\.\s', lines[0]):
+        return False
+    return True
 
 
 # ═══════════════════════════════════════════════════════
@@ -1372,6 +1435,114 @@ def _make_two_column_text_slide(prs, title: str, left_text: str, right_text: str
     return slide
 
 
+def _make_stepper_slide(prs, title: str, steps: list, section_label: str = ''):
+    """
+    Stepper vertical pour processus séquentiels (2 à 6 étapes).
+
+    Chaque étape est représentée par un cercle numéroté (chip) relié au suivant
+    par une ligne verticale, avec un titre et une description à droite.
+    Mise en page adaptative selon le nombre d'étapes.
+
+    steps : liste de dicts {'titre', 'description'} ou de strings (titres seuls).
+    Retourne None si moins de 2 étapes exploitables.
+    """
+    # Normalisation
+    norm = []
+    for s in (steps or []):
+        if isinstance(s, dict):
+            titre = _clean(str(s.get('titre') or s.get('title') or s.get('nom') or ''))
+            desc  = _clean(str(s.get('description') or s.get('desc') or s.get('contenu') or ''))
+        else:
+            titre, desc = _clean(str(s)), ''
+        if titre or desc:
+            norm.append({'titre': titre, 'description': desc})
+    if len(norm) < 2:
+        return None
+    steps_n = norm[:6]
+    n = len(steps_n)
+
+    slide = _content_base(prs, title, section_label)
+
+    # ── En-tête : chip stepper + titre + séparateur
+    top_title = 0.5 if section_label else 0.18
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_STEPS, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    # ── Zone stepper
+    body_top = sep_top + 0.30
+    body_bot = 7.15
+    body_h   = body_bot - body_top
+
+    # Dimensions adaptatives : plus d'étapes = plus petites
+    if n <= 3:
+        chip_d, num_pt, title_pt, desc_pt, desc_max = 0.85, 26, 18, 13, 220
+    elif n == 4:
+        chip_d, num_pt, title_pt, desc_pt, desc_max = 0.75, 22, 16, 12, 160
+    elif n == 5:
+        chip_d, num_pt, title_pt, desc_pt, desc_max = 0.65, 19, 15, 11, 120
+    else:  # 6
+        chip_d, num_pt, title_pt, desc_pt, desc_max = 0.55, 17, 14, 10, 90
+
+    step_h        = body_h / n
+    chip_left     = 0.60
+    chip_center_x = chip_left + chip_d / 2
+    connector_w   = 0.05
+    text_left     = chip_left + chip_d + 0.35
+    text_w        = 13.33 - text_left - 0.40
+
+    for i, step in enumerate(steps_n):
+        y_center = body_top + step_h * (i + 0.5)
+        y_chip   = y_center - chip_d / 2
+
+        # Connecteur vertical depuis l'étape précédente
+        if i > 0:
+            prev_y_center = body_top + step_h * (i - 0.5)
+            conn_top = prev_y_center + chip_d / 2
+            conn_h   = (y_center - chip_d / 2) - conn_top
+            if conn_h > 0:
+                _rect(slide, chip_center_x - connector_w / 2, conn_top,
+                      connector_w, conn_h, C_ACCENT_MID)
+
+        # Chip numéroté
+        _icon_chip(slide, chip_left, y_chip, chip_d, str(i + 1),
+                   bg_color=C_ACCENT, glyph_size_pt=num_pt)
+
+        # Texte : titre (+ description)
+        text_h = step_h - 0.10
+        tb_step = _tb(slide, text_left, y_chip - 0.05, text_w, text_h)
+        tf_step = tb_step.text_frame
+        tf_step.word_wrap = True
+        tf_step.margin_left   = Inches(0.04)
+        tf_step.margin_right  = Inches(0.04)
+        tf_step.margin_top    = Inches(0)
+        tf_step.margin_bottom = Inches(0)
+        tf_step.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+        titre_step = step['titre']
+        desc_step  = _truncate(step['description'], desc_max) if step['description'] else ''
+
+        if titre_step:
+            p_t = tf_step.paragraphs[0]
+            p_t.space_after = Pt(3)
+            _add_runs(p_t, titre_step, title_pt, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+            if desc_step:
+                p_d = tf_step.add_paragraph()
+                p_d.space_before = Pt(2)
+                _add_runs(p_d, desc_step, desc_pt, C_TEXT_LIGHT)
+        elif desc_step:
+            p_d = tf_step.paragraphs[0]
+            _add_runs(p_d, desc_step, desc_pt, C_TEXT_LIGHT)
+
+    return slide
+
+
 def _make_schema_slide(prs, title: str, description: str, elements: list[str],
                         section_label: str = ''):
     """Slide schema : description + éléments reliés par des flèches."""
@@ -1545,6 +1716,27 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=titre)
 
+        elif layout in ('stepper', 'steps', 'process', 'processus', 'etapes', 'étapes'):
+            # Stepper vertical : processus séquentiel numéroté.
+            # Champs tolérés pour la liste : 'etapes', 'steps', 'phases', 'items'.
+            # Chaque étape peut être un dict {titre, description} ou un simple string.
+            raw_steps = (contenu.get('etapes') or contenu.get('étapes')
+                         or contenu.get('steps') or contenu.get('phases')
+                         or contenu.get('items') or [])
+            if raw_steps and _make_stepper_slide(prs, titre, raw_steps) is None:
+                # Fallback si moins de 2 étapes : bullets simple
+                texts = []
+                for s in raw_steps:
+                    if isinstance(s, dict):
+                        t = s.get('titre') or s.get('title') or ''
+                        d = s.get('description') or s.get('desc') or ''
+                        texts.append(f'{t} : {d}' if t and d else (t or d))
+                    else:
+                        texts.append(str(s))
+                texts = [t for t in texts if t]
+                if texts:
+                    _make_content_slide(prs, titre, texts, is_bullets=True)
+
         else:
             # Fallback : bullets avec les valeurs du contenu
             fallback = [str(v) for v in contenu.values() if v][:8]
@@ -1579,6 +1771,10 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
     # Mots-clés déclenchant une slide "callout" (citation / règle clé / maxime)
     SEC_CALLOUT = {'citation', 'règle clé', 'principe clé', 'principe fondamental',
                    'maxime', 'à méditer'}
+    # Mots-clés déclenchant une slide "stepper" (processus séquentiel)
+    SEC_STEPPER = {'étapes', 'etapes', 'procédure', 'procedure',
+                   'démarche', 'demarche', 'processus', 'méthodologie',
+                   'methodologie', 'phases', 'étapes clés', 'cycle de vie'}
 
     section_counter = 0
 
@@ -1625,6 +1821,14 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=h2_title)
                 continue
+
+        # Stepper : titre déclencheur OU contenu principalement en liste numérotée
+        if any(kw in h2_lower for kw in SEC_STEPPER) or _looks_like_steps(section_body):
+            steps = _parse_steps(section_body)
+            if len(steps) >= 2:
+                if _make_stepper_slide(prs, h2_title, steps) is not None:
+                    continue
+            # Sinon, on retombe sur le dispatch classique ci-dessous
 
         section_counter += 1
         _make_section_slide(prs, h2_title, numero=section_counter)
