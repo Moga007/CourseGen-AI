@@ -9,7 +9,7 @@ from io import BytesIO
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.oxml.ns import qn
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION
@@ -160,6 +160,63 @@ def _parse_definitions(text: str) -> list[tuple[str, str]]:
         if m2:
             items.append((_clean(m2.group(1)), m2.group(2).strip()))
     return items[:12]
+
+
+def _parse_blockquote(text: str) -> tuple[str, str]:
+    """
+    Extrait le corps et l'attribution d'un blockquote markdown.
+    Accepte des formes comme :
+
+        > La pensée devient réalité par l'action.
+        > — Albert Einstein
+
+    La dernière ligne commençant par « — » ou « - » (tiret) devient
+    l'attribution, le reste est le corps de la citation.
+    Retourne ('', '') si aucun blockquote n'est trouvé.
+    """
+    quote_lines = []
+    for raw in text.split('\n'):
+        line = raw.strip()
+        if line.startswith('>'):
+            # Enlève le marqueur '>' et les espaces qui suivent
+            quote_lines.append(line.lstrip('>').strip())
+        elif quote_lines and not line:
+            # Ligne vide après des quotes : on continue, elles peuvent être
+            # entrecoupées de lignes vides (markdown standard)
+            continue
+        elif quote_lines:
+            # Ligne non-quote rencontrée après des quotes : on s'arrête
+            break
+
+    # Enlève les lignes vides éventuelles conservées
+    quote_lines = [l for l in quote_lines if l]
+    if not quote_lines:
+        return '', ''
+
+    attribution = ''
+    # Détecte une attribution en dernière ligne (« — Auteur », « - Source »)
+    last = quote_lines[-1]
+    m = re.match(r'^[—–\-]\s*(.+)', last)
+    if m and len(quote_lines) > 1:
+        attribution = m.group(1).strip()
+        quote_lines = quote_lines[:-1]
+
+    body = ' '.join(quote_lines).strip()
+    return _clean(body), _clean(attribution)
+
+
+def _is_pure_blockquote(text: str) -> bool:
+    """True si toutes les lignes non vides du texte sont des quotes markdown."""
+    has_quote = False
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('>'):
+            has_quote = True
+        else:
+            return False
+    return has_quote
 
 
 # ═══════════════════════════════════════════════════════
@@ -814,6 +871,87 @@ def _make_key_points_slide(prs, points: list[str]):
     return slide
 
 
+def _make_callout_slide(prs, quote: str, attribution: str = '',
+                         section_label: str = ''):
+    """
+    Slide "callout / citation" : un texte court mis en exergue (citation,
+    règle clé, principe fondamental). Pensée pour créer une rupture visuelle
+    et faire pause dans la lecture.
+
+    Rendu : fond dégradé violet sombre + grand guillemet décoratif en haut
+    gauche + citation en italique centrée + attribution en bas.
+    """
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_bg(slide, C_BG)
+
+    # ── Fond dégradé pleine slide (diagonale violet sombre → noir) ──
+    bg_rect = _rect(slide, 0, 0, 13.33, 7.5, C_ACCENT_DARK)
+    _fill_gradient(bg_rect, [
+        (0,   C_ACCENT_DARK),
+        (60,  RGBColor(0x12, 0x13, 0x38)),
+        (100, C_BG),
+    ], angle_deg=135)
+
+    # ── Barre accent gauche (cohérence avec autres slides) ──
+    _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
+    _rect(slide, 0.09, 0, 13.24, 0.05, C_ACCENT_MID)
+
+    # Badge section (optionnel)
+    if section_label:
+        _section_badge(slide, section_label, 0.22, 0.12)
+
+    # ── Grand guillemet décoratif (coin haut gauche) ──
+    tb_quote_deco = _tb(slide, 0.5, 0.55, 2.0, 2.0)
+    tf_qd = tb_quote_deco.text_frame
+    tf_qd.margin_left = 0
+    tf_qd.margin_top = 0
+    p_qd = tf_qd.paragraphs[0]
+    run_qd = p_qd.add_run()
+    run_qd.text = '«'
+    _run_fmt(run_qd, 200, C_ACCENT_MID, bold=True, font=FONT_DISPLAY)
+
+    # ── Taille adaptative de la citation selon longueur ──
+    n = len(quote)
+    if n < 80:
+        quote_pt = 34
+    elif n < 150:
+        quote_pt = 28
+    elif n < 250:
+        quote_pt = 22
+    else:
+        quote_pt = 18
+        quote = _truncate(quote, 400)
+
+    # ── Citation centrée ──
+    # Zone large, avec marges gauche/droite généreuses pour respirer
+    tb_quote = _tb(slide, 1.6, 2.0, 10.1, 3.5)
+    tf_q = tb_quote.text_frame
+    tf_q.word_wrap = True
+    tf_q.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p_q = tf_q.paragraphs[0]
+    p_q.alignment = PP_ALIGN.CENTER
+    run_q = p_q.add_run()
+    run_q.text = quote
+    _run_fmt(run_q, quote_pt, C_WHITE, italic=True, font=FONT_DISPLAY)
+
+    # ── Trait accent sous la citation ──
+    _rect(slide, 6.16, 5.75, 1.0, 0.04, C_ACCENT)
+
+    # ── Attribution en bas (italique, muted, préfixée par —) ──
+    if attribution:
+        tb_attr = _tb(slide, 1.6, 5.9, 10.1, 0.6)
+        tf_a = tb_attr.text_frame
+        tf_a.word_wrap = True
+        p_a = tf_a.paragraphs[0]
+        p_a.alignment = PP_ALIGN.CENTER
+        run_a = p_a.add_run()
+        # « — » (em dash) : typographie française propre pour attribution
+        run_a.text = f'— {attribution}'
+        _run_fmt(run_a, 14, C_TEXT_MUTED, italic=True, font=FONT_BODY)
+
+    return slide
+
+
 # ═══════════════════════════════════════════════════════
 #  SLIDES V2 — layouts du pipeline multi-agents
 # ═══════════════════════════════════════════════════════
@@ -1317,6 +1455,19 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             elements    = [str(e) for e in (contenu.get('elements') or [])]
             _make_schema_slide(prs, titre, description, elements)
 
+        elif layout == 'callout':
+            # Callout / citation : un texte court mis en exergue.
+            # Champs tolérés : 'texte' (principal), 'citation', 'quote' ;
+            # attribution dans 'attribution', 'auteur' ou 'source'.
+            quote = (contenu.get('texte') or contenu.get('citation')
+                     or contenu.get('quote') or '')
+            attribution = (contenu.get('attribution') or contenu.get('auteur')
+                           or contenu.get('source') or '')
+            quote = str(quote).strip()
+            attribution = str(attribution).strip()
+            if quote:
+                _make_callout_slide(prs, quote, attribution, section_label=titre)
+
         else:
             # Fallback : bullets avec les valeurs du contenu
             fallback = [str(v) for v in contenu.values() if v][:8]
@@ -1348,6 +1499,9 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
     SKIP      = {'tableau comparatif', 'synthèse visuelle', 'pour aller plus loin'}
     SEC_DEF   = {'définitions des concepts clés', 'définitions'}
     SEC_PTS   = {'points importants à retenir', 'points clés', 'à retenir'}
+    # Mots-clés déclenchant une slide "callout" (citation / règle clé / maxime)
+    SEC_CALLOUT = {'citation', 'règle clé', 'principe clé', 'principe fondamental',
+                   'maxime', 'à méditer'}
 
     section_counter = 0
 
@@ -1377,6 +1531,23 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             if points:
                 _make_key_points_slide(prs, points)
             continue
+
+        if any(kw in h2_lower for kw in SEC_CALLOUT):
+            # D'abord un blockquote, sinon on prend le premier paragraphe.
+            quote, attribution = _parse_blockquote(section_body)
+            if not quote:
+                quote = _first_paragraph(section_body)
+            if quote:
+                _make_callout_slide(prs, quote, attribution)
+            continue
+
+        # Auto-détection : section dont le corps est exclusivement un blockquote
+        # (titre non matché par SEC_CALLOUT mais contenu sans ambiguïté)
+        if _is_pure_blockquote(section_body):
+            quote, attribution = _parse_blockquote(section_body)
+            if quote:
+                _make_callout_slide(prs, quote, attribution, section_label=h2_title)
+                continue
 
         section_counter += 1
         _make_section_slide(prs, h2_title, numero=section_counter)
