@@ -57,6 +57,14 @@ CHIFFRES_ROMAINS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
 CIRCLED_NUMS     = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩',
                     '⑪', '⑫']
 
+# Chips pédagogiques par type de slide (médaillons circulaires à côté du titre)
+CHIP_DEF     = '◈'   # définitions de concepts
+CHIP_PTS     = '★'   # points importants à retenir
+CHIP_STATS   = '%'   # statistiques / chiffres clés
+CHIP_SCHEMA  = '◉'   # schéma / relations entre éléments
+CHIP_COMPARE = '⇌'   # comparaison (deux colonnes)
+CHIP_TABLE   = '▦'   # tableau de données
+
 
 # ═══════════════════════════════════════════════════════
 #  UTILITAIRES MARKDOWN
@@ -689,7 +697,8 @@ def _make_two_column_slide(prs, title: str, bullets: list[str], section_label: s
     slide = _content_base(prs, title, section_label)
 
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_COMPARE, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -732,7 +741,8 @@ def _make_table_slide(prs, title: str, headers: list[str], rows: list[list[str]]
     slide = _content_base(prs, title, section_label)
 
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_TABLE, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -790,7 +800,7 @@ def _make_definitions_slide(prs, items: list[tuple[str, str]]):
     header = _rect(slide, 0.09, 0, 13.24, 0.75, C_ACCENT_DARK)
     _fill_gradient(header, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)], angle_deg=0)
 
-    _icon_chip(slide, 0.28, 0.14, 0.48, '◈', bg_color=C_ACCENT)
+    _icon_chip(slide, 0.28, 0.14, 0.48, CHIP_DEF, bg_color=C_ACCENT)
     tb_hdr = _tb(slide, 0.9, 0.1, 12.1, 0.55)
     p = tb_hdr.text_frame.paragraphs[0]
     p.alignment = PP_ALIGN.LEFT
@@ -835,7 +845,7 @@ def _make_key_points_slide(prs, points: list[str]):
     header = _rect(slide, 0.09, 0, 13.24, 0.75, C_ACCENT_DARK)
     _fill_gradient(header, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)], angle_deg=0)
 
-    _icon_chip(slide, 0.28, 0.14, 0.48, '★', bg_color=C_ACCENT)
+    _icon_chip(slide, 0.28, 0.14, 0.48, CHIP_PTS, bg_color=C_ACCENT)
     tb_hdr = _tb(slide, 0.9, 0.1, 12.1, 0.55)
     p = tb_hdr.text_frame.paragraphs[0]
     run = p.add_run()
@@ -1039,7 +1049,8 @@ def _make_progress_slide(prs, title: str, stats: list, section_label: str = ''):
 
     # En-tête (titre + trait accent) — aligné sur les autres slides stat/chart
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_STATS, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -1142,7 +1153,8 @@ def _make_stat_chart_slide(prs, title: str, stats: list, section_label: str = ''
     slide = _content_base(prs, title, section_label)
 
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_STATS, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -1223,7 +1235,8 @@ def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''
     slide = _content_base(prs, title, section_label)
 
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_STATS, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -1270,7 +1283,8 @@ def _make_two_column_text_slide(prs, title: str, left_text: str, right_text: str
     slide = _content_base(prs, title, section_label)
 
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_COMPARE, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -1302,7 +1316,8 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
     slide = _content_base(prs, title, section_label)
 
     top_title = 0.5 if section_label else 0.18
-    tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_SCHEMA, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
     tf = tb_title.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
