@@ -66,6 +66,9 @@ CHIP_SCHEMA  = '◉'   # schéma / relations entre éléments
 CHIP_COMPARE = '⇌'   # comparaison (deux colonnes)
 CHIP_TABLE   = '▦'   # tableau de données
 CHIP_STEPS   = '⇣'   # processus séquentiel / stepper vertical
+CHIP_GOAL    = '◎'   # objectifs pédagogiques (cible / visée)
+CHIP_RECAP   = '✦'   # synthèse / à retenir (distinct de CHIP_PTS='★')
+CHIP_CHECK   = '✓'   # marqueur de validation devant chaque objectif
 
 # Motif de fond subtil (appliqué à toutes les slides de contenu via _content_base).
 # Presets DrawingML les plus adaptés à un fond sombre :
@@ -1292,6 +1295,232 @@ def _make_callout_slide(prs, quote: str, attribution: str = '',
     return slide
 
 
+def _split_objective_phrase(text: str) -> tuple[str, str]:
+    """
+    Sépare un objectif pédagogique en (verbe_gras, reste).
+    Si le texte commence par **verbe** (ex : "**Analyser** les flux…"), on met
+    le verbe en couleur accent pour souligner la compétence visée.
+    Sinon retourne ('', text).
+    """
+    m = re.match(r'^\*\*(.+?)\*\*\s*(.*)', text.strip())
+    if m:
+        return _clean(m.group(1)), m.group(2).strip()
+    return '', text.strip()
+
+
+def _make_objectives_slide(prs, items: list[str], section_label: str = ''):
+    """
+    Slide « Objectifs pédagogiques ».
+
+    Placée en tête de chapitre ou de section, elle annonce les compétences
+    visées. Rendu : bandeau titre « OBJECTIFS PÉDAGOGIQUES » + phrase
+    d'introduction « À l'issue de cette séquence, vous serez capable de : »
+    + liste de 3 à 6 objectifs, chacun précédé d'une pastille ✓ verte.
+
+    Les items de la forme « **Verbe** complément » voient leur verbe mis en
+    couleur accent (souligne le verbe d'action pédagogique).
+    """
+    # Normalisation
+    objs = [_clean(str(it)) for it in (items or []) if str(it).strip()]
+    if not objs:
+        return None
+    objs = objs[:6]
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_bg(slide, C_BG_CARD)
+    if BG_PATTERN_ENABLED:
+        _add_pattern_overlay(slide)
+    _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
+
+    # ── En-tête : bande dégradée + chip cible + label
+    header = _rect(slide, 0.09, 0, 13.24, 0.85, C_ACCENT_DARK)
+    _fill_gradient(header, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)], angle_deg=0)
+    _icon_chip(slide, 0.28, 0.19, 0.48, CHIP_GOAL, bg_color=C_ACCENT)
+    tb_hdr = _tb(slide, 0.9, 0.15, 12.1, 0.55)
+    p_h = tb_hdr.text_frame.paragraphs[0]
+    run_h = p_h.add_run()
+    run_h.text = 'OBJECTIFS PÉDAGOGIQUES'
+    _run_fmt(run_h, 16, C_WHITE, bold=True, font=FONT_DISPLAY)
+    _rect(slide, 0.09, 0.83, 13.24, 0.03, C_SUCCESS)
+
+    # ── Phrase d'introduction
+    tb_intro = _tb(slide, 0.5, 1.0, 12.33, 0.55)
+    tf_i = tb_intro.text_frame
+    tf_i.word_wrap = True
+    p_i = tf_i.paragraphs[0]
+    run_i = p_i.add_run()
+    run_i.text = 'À l’issue de cette séquence, vous serez capable de :'
+    _run_fmt(run_i, 14, C_TEXT_MUTED, italic=True, font=FONT_BODY)
+
+    # ── Dimensions adaptatives selon le nombre d'objectifs
+    n = len(objs)
+    body_top = 1.70
+    body_bot = 7.15
+    body_h   = body_bot - body_top
+    row_h    = body_h / n
+
+    # Chip/police proportionnels (3 → large et aéré ; 6 → compact)
+    if n <= 3:
+        chip_d, chip_pt, txt_pt = 0.60, 20, 18
+    elif n == 4:
+        chip_d, chip_pt, txt_pt = 0.52, 18, 16
+    elif n == 5:
+        chip_d, chip_pt, txt_pt = 0.46, 16, 15
+    else:  # 6
+        chip_d, chip_pt, txt_pt = 0.40, 14, 14
+
+    chip_left = 0.55
+    text_left = chip_left + chip_d + 0.30
+    text_w    = 13.33 - text_left - 0.40
+
+    for i, obj in enumerate(objs):
+        y_center = body_top + row_h * (i + 0.5)
+        y_chip   = y_center - chip_d / 2
+
+        # Pastille verte avec coche
+        _icon_chip(slide, chip_left, y_chip, chip_d, CHIP_CHECK,
+                   bg_color=C_SUCCESS, glyph_size_pt=chip_pt)
+
+        # Texte de l'objectif — verbe d'action mis en couleur accent si détecté
+        tb = _tb(slide, text_left, y_chip - 0.05, text_w, chip_d + 0.10)
+        tf = tb.text_frame
+        tf.word_wrap = True
+        tf.margin_left   = Inches(0.04)
+        tf.margin_right  = Inches(0.04)
+        tf.margin_top    = Inches(0)
+        tf.margin_bottom = Inches(0)
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        p = tf.paragraphs[0]
+
+        verb, rest = _split_objective_phrase(obj)
+        if verb:
+            rv = p.add_run()
+            rv.text = verb + ' '
+            _run_fmt(rv, txt_pt, C_ACCENT2, bold=True, font=FONT_DISPLAY)
+            _add_runs(p, rest, txt_pt, C_TEXT_LIGHT)
+        else:
+            _add_runs(p, obj, txt_pt, C_TEXT_LIGHT)
+
+    return slide
+
+
+def _make_synthese_slide(prs, items: list[str], section_label: str = ''):
+    """
+    Slide « Synthèse / À retenir ».
+
+    Placée en fin de chapitre ou de section, elle récapitule les 3 à 5
+    points clés. Rendu : bandeau « SYNTHÈSE • À RETENIR » + cartes
+    numérotées avec chip étoile, titre en gras et corps en texte clair.
+
+    Les items de la forme « **Lead** : explication » sont rendus en deux
+    temps : lead en couleur accent + corps sous forme de phrase support.
+    """
+    pts = [_clean(str(it)) for it in (items or []) if str(it).strip()]
+    if not pts:
+        return None
+    pts = pts[:5]
+    n = len(pts)
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_bg(slide, C_BG_CARD)
+    if BG_PATTERN_ENABLED:
+        _add_pattern_overlay(slide)
+    _rect(slide, 0, 0, 0.09, 7.5, C_ACCENT)
+
+    # ── En-tête dégradé avec chip synthèse
+    header = _rect(slide, 0.09, 0, 13.24, 0.85, C_ACCENT_DARK)
+    _fill_gradient(header, [(0, C_ACCENT_DARK), (100, C_ACCENT_MID)], angle_deg=0)
+    _icon_chip(slide, 0.28, 0.19, 0.48, CHIP_RECAP, bg_color=C_ACCENT)
+    tb_hdr = _tb(slide, 0.9, 0.15, 12.1, 0.55)
+    p_h = tb_hdr.text_frame.paragraphs[0]
+    run_h = p_h.add_run()
+    run_h.text = 'SYNTHÈSE  •  À RETENIR'
+    _run_fmt(run_h, 16, C_WHITE, bold=True, font=FONT_DISPLAY)
+    _rect(slide, 0.09, 0.83, 13.24, 0.03, C_ACCENT)
+
+    # ── Zone cartes (layout vertical, une carte par take-away)
+    body_top = 1.15
+    body_bot = 7.15
+    body_h   = body_bot - body_top
+    gap      = 0.15
+    card_h   = (body_h - gap * (n - 1)) / n
+
+    # Police adaptative : 3 → confortable ; 5 → compacte
+    if n <= 3:
+        num_pt, lead_pt, body_pt = 32, 18, 14
+        lead_max = 300
+    elif n == 4:
+        num_pt, lead_pt, body_pt = 26, 16, 13
+        lead_max = 200
+    else:  # 5
+        num_pt, lead_pt, body_pt = 22, 15, 12
+        lead_max = 150
+
+    card_left = 0.40
+    card_w    = 13.33 - card_left - 0.40
+    num_w     = 0.90  # largeur de la colonne numéro
+
+    for i, point in enumerate(pts):
+        y = body_top + i * (card_h + gap)
+
+        # Carte fond dégradé (légère surcouche visuelle)
+        card = _rounded_rect(slide, card_left, y, card_w, card_h, C_ACCENT_DARK)
+        _fill_gradient(card, [(0, C_ACCENT_DARK), (100, C_BG_CARD)], angle_deg=0)
+        _add_shadow(card, blur_pt=8, dist_pt=2, alpha_pct=35, dir_deg=90)
+
+        # Liséré vertical accent sur le bord gauche de la carte
+        _rect(slide, card_left, y, 0.06, card_h, C_ACCENT)
+
+        # Numéro gros caractère dans la colonne de gauche
+        tb_num = _tb(slide, card_left + 0.12, y, num_w, card_h)
+        tf_n = tb_num.text_frame
+        tf_n.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf_n.margin_left = Inches(0.04)
+        tf_n.margin_top  = Inches(0)
+        p_n = tf_n.paragraphs[0]
+        p_n.alignment = PP_ALIGN.CENTER
+        run_n = p_n.add_run()
+        run_n.text = str(i + 1).zfill(2)
+        _run_fmt(run_n, num_pt, C_ACCENT2, bold=True, font=FONT_DISPLAY)
+
+        # Texte principal (lead éventuel + corps)
+        text_left = card_left + 0.20 + num_w + 0.15
+        text_w    = card_w - (text_left - card_left) - 0.25
+        tb_t = _tb(slide, text_left, y + 0.10, text_w, card_h - 0.20)
+        tf_t = tb_t.text_frame
+        tf_t.word_wrap = True
+        tf_t.margin_left   = Inches(0.04)
+        tf_t.margin_right  = Inches(0.04)
+        tf_t.margin_top    = Inches(0)
+        tf_t.margin_bottom = Inches(0)
+        tf_t.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+        # Détecte un lead « **Titre** : corps » ou « Titre : corps »
+        lead, rest = '', _truncate(point, lead_max)
+        mb = re.match(r'^\*\*(.+?)\*\*\s*[:：]\s*(.+)', point)
+        if mb:
+            lead = _clean(mb.group(1))
+            rest = _truncate(_clean(mb.group(2)), lead_max)
+        elif ':' in point and len(point.split(':', 1)[0]) <= 60:
+            tit, body = point.split(':', 1)
+            if body.strip():
+                lead = _clean(tit)
+                rest = _truncate(_clean(body), lead_max)
+
+        if lead:
+            p_l = tf_t.paragraphs[0]
+            p_l.space_after = Pt(3)
+            _add_runs(p_l, lead, lead_pt, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+            p_b = tf_t.add_paragraph()
+            p_b.space_before = Pt(2)
+            _add_runs(p_b, rest, body_pt, C_TEXT_LIGHT)
+        else:
+            p_l = tf_t.paragraphs[0]
+            _add_runs(p_l, rest, lead_pt, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    return slide
+
+
 # ═══════════════════════════════════════════════════════
 #  SLIDES V2 — layouts du pipeline multi-agents
 # ═══════════════════════════════════════════════════════
@@ -1859,9 +2088,14 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
         # Route vers _make_definitions_slide / _make_key_points_slide avec
         # fallback sur le dispatch normal si le contenu n'est pas exploitable.
         titre_lower = titre.lower()
-        SEC_DEF_KW = ('définitions des concepts clés', 'définitions', 'concepts clés')
-        SEC_PTS_KW = ('points importants à retenir', 'points importants',
-                      'points clés', 'à retenir')
+        SEC_DEF_KW  = ('définitions des concepts clés', 'définitions', 'concepts clés')
+        SEC_PTS_KW  = ('points importants à retenir', 'points importants',
+                       'points clés')
+        SEC_GOAL_KW = ('objectifs pédagogiques', 'objectifs du cours',
+                       'objectifs du chapitre', 'objectifs d\'apprentissage',
+                       'compétences visées')
+        SEC_RECAP_KW = ('synthèse', 'à retenir', 'récapitulatif',
+                        'take-aways', 'en résumé', 'l\'essentiel')
 
         if layout in ('bullets', 'two-column'):
             items_raw = contenu.get('items') or []
@@ -1882,6 +2116,16 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
                 points = [_clean(str(it)) for it in items_raw if str(it).strip()]
                 if points:
                     _make_key_points_slide(prs, points[:12])
+                    continue
+
+            if items_raw and any(kw in titre_lower for kw in SEC_GOAL_KW):
+                objs = [_clean(str(it)) for it in items_raw if str(it).strip()]
+                if objs and _make_objectives_slide(prs, objs) is not None:
+                    continue
+
+            if items_raw and any(kw in titre_lower for kw in SEC_RECAP_KW):
+                pts = [_clean(str(it)) for it in items_raw if str(it).strip()]
+                if pts and _make_synthese_slide(prs, pts) is not None:
                     continue
 
         # ── Slides de contenu selon layout ──────────────────────────────────
@@ -1932,6 +2176,26 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             attribution = str(attribution).strip()
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=titre)
+
+        elif layout in ('objectives', 'objectifs', 'goals', 'learning-objectives'):
+            # Objectifs pédagogiques : liste de compétences visées (3 à 6).
+            # Champs tolérés : 'objectifs', 'items', 'goals', 'competences'.
+            raw = (contenu.get('objectifs') or contenu.get('items')
+                   or contenu.get('goals') or contenu.get('competences') or [])
+            objs = [str(x) for x in raw if str(x).strip()]
+            if objs and _make_objectives_slide(prs, objs) is None:
+                _make_content_slide(prs, titre or 'Objectifs pédagogiques',
+                                    objs, is_bullets=True)
+
+        elif layout in ('synthese', 'synthèse', 'recap', 'summary', 'takeaways'):
+            # Synthèse / À retenir : 3 à 5 points clés récapitulatifs.
+            # Champs tolérés : 'points', 'items', 'takeaways', 'recap'.
+            raw = (contenu.get('points') or contenu.get('items')
+                   or contenu.get('takeaways') or contenu.get('recap') or [])
+            pts = [str(x) for x in raw if str(x).strip()]
+            if pts and _make_synthese_slide(prs, pts) is None:
+                _make_content_slide(prs, titre or 'Synthèse', pts,
+                                    is_bullets=True)
 
         elif layout in ('stepper', 'steps', 'process', 'processus', 'etapes', 'étapes'):
             # Stepper vertical : processus séquentiel numéroté.
@@ -1996,7 +2260,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
 
     SKIP      = {'tableau comparatif', 'synthèse visuelle', 'pour aller plus loin'}
     SEC_DEF   = {'définitions des concepts clés', 'définitions'}
-    SEC_PTS   = {'points importants à retenir', 'points clés', 'à retenir'}
+    SEC_PTS   = {'points importants à retenir', 'points clés'}
     # Mots-clés déclenchant une slide "callout" (citation / règle clé / maxime)
     SEC_CALLOUT = {'citation', 'règle clé', 'principe clé', 'principe fondamental',
                    'maxime', 'à méditer'}
@@ -2004,6 +2268,20 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
     SEC_STEPPER = {'étapes', 'etapes', 'procédure', 'procedure',
                    'démarche', 'demarche', 'processus', 'méthodologie',
                    'methodologie', 'phases', 'étapes clés', 'cycle de vie'}
+    # Mots-clés déclenchant une slide "Objectifs pédagogiques" (tête de chapitre).
+    # Volontairement spécifiques : 'objectifs' bare matcherait « Objectifs
+    # commerciaux / marketing » dans le corps d'un cours — à proscrire.
+    SEC_GOAL = {'objectifs pédagogiques', 'objectifs pedagogiques',
+                'objectifs du cours', 'objectifs du chapitre',
+                'objectifs de la séquence', 'objectifs de la sequence',
+                'objectifs d\'apprentissage', 'objectifs dapprentissage',
+                'compétences visées', 'competences visees',
+                'à l’issue', 'à l\'issue', 'a l\'issue'}
+    # Mots-clés déclenchant une slide "Synthèse / À retenir" (fin de chapitre)
+    SEC_RECAP = {'synthèse', 'synthese', 'à retenir', 'a retenir',
+                 'récapitulatif', 'recapitulatif', 'take-aways', 'take aways',
+                 'en résumé', 'en resume', 'conclusion clé', 'l\'essentiel',
+                 'l’essentiel'}
 
     section_counter = 0
 
@@ -2028,6 +2306,30 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             """Ajoute l'entrée au sommaire si au moins une slide a été créée."""
             if len(prs.slides) > _slides_before:
                 toc_entries.append((h2_title, prs.slides[_slides_before]))
+
+        # ── Objectifs pédagogiques (tête de chapitre/section) ──
+        if any(kw in h2_lower for kw in SEC_GOAL):
+            objs = _extract_bullets(section_body, max_b=6)
+            if not objs:
+                # Fallback : lignes non vides du 1er paragraphe
+                para = _first_paragraph(section_body)
+                if para:
+                    objs = [l.strip() for l in para.split('.') if l.strip()][:6]
+            if objs and _make_objectives_slide(prs, objs) is not None:
+                _record_toc()
+                continue
+            # Sinon : fallback sur dispatch classique ci-dessous
+
+        # ── Synthèse / À retenir (fin de chapitre/section) ──
+        if any(kw in h2_lower for kw in SEC_RECAP):
+            pts = _extract_bullets(section_body, max_b=5)
+            if not pts:
+                para = _first_paragraph(section_body)
+                if para:
+                    pts = [l.strip() for l in para.split('.') if l.strip()][:5]
+            if pts and _make_synthese_slide(prs, pts) is not None:
+                _record_toc()
+                continue
 
         if any(kw in h2_lower for kw in SEC_DEF):
             items = _parse_definitions(section_body)
