@@ -32,7 +32,8 @@ C_TEXT_MUTED   = RGBColor(0x94, 0xA3, 0xB8)
 C_TABLE_HDR    = RGBColor(0x3B, 0x3E, 0xB8)
 C_TABLE_ROW1   = RGBColor(0x12, 0x12, 0x28)
 C_TABLE_ROW2   = RGBColor(0x18, 0x18, 0x34)
-C_SUCCESS      = RGBColor(0x34, 0xD3, 0x99)
+C_SUCCESS      = RGBColor(0x34, 0xD3, 0x99)   # vert (pour / avantages / après)
+C_WARN         = RGBColor(0xF5, 0x9E, 0x42)   # orange (contre / inconvénients / avant)
 C_BULLET       = RGBColor(0x6E, 0x75, 0xF9)   # Couleur des marqueurs bullets
 
 # ═══════════════════════════════════════════════════════
@@ -287,6 +288,73 @@ def _parse_steps(text: str) -> list[dict]:
     if current:
         steps.append(current)
     return steps
+
+
+_KPI_VALUE_RE = re.compile(
+    r'^\s*[-*•]\s*\*\*([^*]+?)\*\*\s*(?:[:：\-–—]|\s)\s*(.+)$'
+    r'|^\s*[-*•]\s*(\d[\d\s.,]*\s*(?:%|€|\$|£|¥|M|Md|Mds|k|×|x|pts?|j|h|mois|ans?|fois)?)\s*'
+    r'(?:[:：\-–—])\s*(.+)$',
+    re.IGNORECASE,
+)
+
+_KPI_LOOKS_NUMERIC_RE = re.compile(
+    r'^\s*\d[\d\s.,]*\s*(%|€|\$|£|¥|M|Md|Mds|k|×|x|pts?|j|h|mois|ans?|fois)?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _parse_kpi_bullets(text: str, max_n: int = 4) -> list[dict]:
+    """
+    Extrait des KPI chiffrés depuis des bullets markdown.
+
+    Patterns supportés (majoritairement rencontrés dans les cours IESIG) :
+        - **85%** des entreprises B2B utilisent le CRM
+        - **1 500 €** par client et par an
+        - **3×** plus efficace que la méthode traditionnelle
+        - 73% — des français consultent les avis en ligne
+
+    Retourne [{'valeur': str, 'label': str}, ...] (max_n items).
+    La valeur doit être purement numérique (avec suffixe éventuel) pour être
+    reconnue comme KPI. Le label est la suite du bullet, tronqué à 60 chars.
+    """
+    out = []
+    for raw in text.split('\n'):
+        line = raw.strip()
+        if not line or not re.match(r'^[-*•]', line):
+            continue
+        m = _KPI_VALUE_RE.match(line)
+        if not m:
+            continue
+        # Deux captures possibles selon l'alternative du regex
+        if m.group(1) is not None:
+            valeur_candidate = m.group(1).strip()
+            label_candidate  = m.group(2).strip()
+        else:
+            valeur_candidate = m.group(3).strip()
+            label_candidate  = m.group(4).strip()
+
+        # On ne garde que si la valeur est effectivement numérique
+        if not _KPI_LOOKS_NUMERIC_RE.match(valeur_candidate):
+            continue
+        valeur = _clean(valeur_candidate)
+        label  = _truncate(_clean(label_candidate), 60)
+        if valeur and label:
+            out.append({'valeur': valeur, 'label': label})
+        if len(out) >= max_n:
+            break
+    return out
+
+
+def _looks_like_kpi(text: str) -> bool:
+    """
+    True si le texte ressemble à une slide KPI : au moins 2 bullets et
+    >=50% des bullets reconnus comme KPI par `_parse_kpi_bullets`.
+    """
+    bullets = [l for l in text.split('\n') if re.match(r'^\s*[-*•]', l.strip())]
+    if len(bullets) < 2:
+        return False
+    kpis = _parse_kpi_bullets(text, max_n=12)
+    return len(kpis) >= 2 and len(kpis) >= 0.5 * len(bullets)
 
 
 def _looks_like_steps(text: str) -> bool:
@@ -1069,6 +1137,40 @@ def _make_two_column_slide(prs, title: str, bullets: list[str], section_label: s
 #  SLIDE TABLEAU
 # ═══════════════════════════════════════════════════════
 
+_NUMERIC_CELL_RE = re.compile(
+    r'^\s*[-+]?\d[\d\s.,]*\s*(%|€|\$|£|¥|pts?|x|×|k|M|Md|Mds|h|j|an|ans|°C|°|\/\d+)?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _is_numeric_cell(text: str) -> bool:
+    """True si la cellule ressemble à une valeur numérique (avec suffixe éventuel)."""
+    if not text or not text.strip():
+        return False
+    return bool(_NUMERIC_CELL_RE.match(text.strip()))
+
+
+def _remove_cell_borders(cell):
+    """
+    Supprime les bordures par défaut des cellules de tableau.
+    python-pptx ne fournit pas d'API pour ça — on passe par l'XML :
+    on ajoute <a:ln><a:noFill/></a:ln> sur chaque arête (L/R/T/B).
+    Rendu final : séparateurs visuels assurés uniquement par les couleurs
+    de remplissage alternées, plus propre et plus moderne.
+    """
+    tcPr = cell._tc.get_or_add_tcPr()
+    for tag in ('lnL', 'lnR', 'lnT', 'lnB'):
+        # Retire les éventuels <a:lnX> existants avant d'ajouter les nôtres
+        for existing in tcPr.findall(qn(f'a:{tag}')):
+            tcPr.remove(existing)
+        ln = etree.SubElement(tcPr, qn(f'a:{tag}'))
+        ln.set('w', '0')
+        ln.set('cap', 'flat')
+        ln.set('cmpd', 'sng')
+        ln.set('algn', 'ctr')
+        etree.SubElement(ln, qn('a:noFill'))
+
+
 def _make_table_slide(prs, title: str, headers: list[str], rows: list[list[str]],
                       section_label: str = ''):
     slide = _content_base(prs, title, section_label)
@@ -1089,33 +1191,83 @@ def _make_table_slide(prs, title: str, headers: list[str], rows: list[list[str]]
     if n_cols == 0 or n_rows < 2:
         return slide
 
-    tbl_top  = Inches(sep_top + 0.18)
+    # Détection des colonnes numériques : si >=60% des valeurs d'une colonne
+    # ressemblent à des nombres, on aligne à droite toute la colonne.
+    numeric_cols = set()
+    for j in range(n_cols):
+        col_vals = [(rows[i][j] if j < len(rows[i]) else '') for i in range(len(rows))]
+        non_empty = [v for v in col_vals if v and v.strip()]
+        if non_empty and sum(1 for v in non_empty if _is_numeric_cell(v)) >= max(2, int(0.6 * len(non_empty))):
+            numeric_cols.add(j)
+
+    # Première colonne en gras si c'est typiquement une colonne label (texte court,
+    # pas numérique). Évite d'ajouter du gras partout.
+    bold_first_col = (0 not in numeric_cols) and all(
+        len((rows[i][0] if 0 < len(rows[i]) else '')) < 40 for i in range(len(rows))
+    )
+
+    tbl_top  = Inches(sep_top + 0.22)
     tbl_left = Inches(0.22)
     tbl_w    = Inches(12.9)
-    row_h    = Inches(min(0.52, 5.6 / n_rows))
-    tbl      = slide.shapes.add_table(n_rows, n_cols, tbl_left, tbl_top, tbl_w, row_h * n_rows).table
+    # Hauteur header légèrement plus grande que les rows pour mieux marquer la hiérarchie
+    header_h = Inches(min(0.58, 6.0 / n_rows + 0.05))
+    body_row_h = Inches(min(0.50, 5.6 / max(n_rows - 1, 1)))
+    tbl_shape = slide.shapes.add_table(
+        n_rows, n_cols, tbl_left, tbl_top, tbl_w,
+        header_h + body_row_h * (n_rows - 1),
+    )
+    tbl = tbl_shape.table
+
+    # Hauteurs de ligne explicites (header distinct + body réguliers)
+    tbl.rows[0].height = header_h
+    for i in range(1, n_rows):
+        tbl.rows[i].height = body_row_h
 
     col_w = tbl_w // n_cols
     for col in tbl.columns:
         col.width = col_w
 
-    def _cell(cell, bg: RGBColor, text: str, bold=False, align=PP_ALIGN.CENTER):
+    def _cell(cell, bg: RGBColor, text: str, *, bold=False, align=PP_ALIGN.LEFT,
+              color=C_WHITE, size=11, is_header=False):
         cell.fill.solid()
         cell.fill.fore_color.rgb = bg
+        # Padding cellule : aère un peu le contenu
+        cell.margin_left   = Inches(0.10)
+        cell.margin_right  = Inches(0.10)
+        cell.margin_top    = Inches(0.04)
+        cell.margin_bottom = Inches(0.04)
+        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+        _remove_cell_borders(cell)
+
         tf = cell.text_frame
         tf.word_wrap = True
         p = tf.paragraphs[0]
         p.alignment = align
-        p.space_before = Pt(2)
-        _add_runs(p, text, 11, C_WHITE, base_bold=bold)
+        p.space_before = Pt(0)
+        p.space_after  = Pt(0)
+        _add_runs(p, str(text), size, color, base_bold=bold,
+                  font=(FONT_DISPLAY if is_header else FONT_BODY))
 
+    # Header row : alignement selon colonne (numérique → droite, sinon gauche)
     for j, h in enumerate(headers[:n_cols]):
-        _cell(tbl.cell(0, j), C_TABLE_HDR, h, bold=True)
+        align = PP_ALIGN.RIGHT if j in numeric_cols else PP_ALIGN.LEFT
+        # Centre la 1re colonne label si elle est un index court (<= 3 lettres)
+        if j == 0 and bold_first_col and len(str(h).strip()) <= 3:
+            align = PP_ALIGN.LEFT
+        _cell(tbl.cell(0, j), C_TABLE_HDR, h, bold=True, align=align,
+              color=C_WHITE, size=12, is_header=True)
 
+    # Body rows : alternance + alignement numérique à droite
     for i, row in enumerate(rows[:n_rows - 1]):
         bg = C_TABLE_ROW1 if i % 2 == 0 else C_TABLE_ROW2
         for j in range(n_cols):
-            _cell(tbl.cell(i + 1, j), bg, row[j] if j < len(row) else '', align=PP_ALIGN.LEFT)
+            val = row[j] if j < len(row) else ''
+            is_num = j in numeric_cols
+            align = PP_ALIGN.RIGHT if is_num else PP_ALIGN.LEFT
+            bold  = bold_first_col and j == 0
+            color = C_ACCENT2 if (bold and j == 0) else C_TEXT_LIGHT
+            _cell(tbl.cell(i + 1, j), bg, val, bold=bold, align=align,
+                  color=color, size=11)
 
     return slide
 
@@ -1517,6 +1669,255 @@ def _make_synthese_slide(prs, items: list[str], section_label: str = ''):
         else:
             p_l = tf_t.paragraphs[0]
             _add_runs(p_l, rest, lead_pt, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    return slide
+
+
+def _parse_versus(text: str) -> dict | None:
+    """
+    Parse un bloc « versus / comparaison » en deux colonnes.
+
+    Formes supportées :
+      1. Deux sous-titres H3 (### Avant / ### Après) avec bullets sous chacun
+      2. Tableau markdown à 2 colonnes (headers deviennent les labels)
+      3. Paragraphe intro + deux H4/sous-listes
+      4. Fallback : alterne les bullets (impair = gauche, pair = droite)
+         si au moins 4 bullets sont présents
+
+    Retourne {'left_label', 'left_items', 'right_label', 'right_items'}
+    ou None si la structure n'est pas exploitable (< 2 items de chaque côté).
+    """
+    # ── Cas 1 : deux H3 ──────────────────────────────────────────────
+    h3_re = re.compile(r'^#{3,4}\s+(.+)$', re.MULTILINE)
+    h3_matches = list(h3_re.finditer(text))
+    if len(h3_matches) >= 2:
+        blocks = []
+        for i, m in enumerate(h3_matches[:2]):
+            label = _clean(m.group(1))
+            start = m.end()
+            end   = h3_matches[i + 1].start() if i + 1 < len(h3_matches) else len(text)
+            body  = text[start:end]
+            items = _extract_bullets(body, max_b=6)
+            if not items:
+                # Fallback : phrases courtes du paragraphe
+                para = _first_paragraph(body)
+                if para:
+                    items = [s.strip() for s in para.split('.') if s.strip()][:6]
+            blocks.append((label, items))
+        if len(blocks[0][1]) >= 1 and len(blocks[1][1]) >= 1:
+            return {
+                'left_label': blocks[0][0], 'left_items': blocks[0][1],
+                'right_label': blocks[1][0], 'right_items': blocks[1][1],
+            }
+
+    # ── Cas 2 : tableau markdown 2 colonnes ──────────────────────────
+    headers, rows = _parse_md_table(text)
+    if len(headers) == 2 and len(rows) >= 2:
+        left_items  = [r[0] for r in rows if len(r) > 0 and r[0].strip()][:6]
+        right_items = [r[1] for r in rows if len(r) > 1 and r[1].strip()][:6]
+        if len(left_items) >= 1 and len(right_items) >= 1:
+            return {
+                'left_label': _clean(headers[0]),
+                'left_items': left_items,
+                'right_label': _clean(headers[1]),
+                'right_items': right_items,
+            }
+
+    # ── Cas 3 : parser « Avant : ... / Après : ... » inline ──────────
+    # Forme : "**Avant** : liste1 ; item2 ; item3" et "**Après** : ..."
+    inline = re.findall(r'\*\*([^*]+?)\*\*\s*[:：]\s*([^\n]+)', text)
+    if len(inline) >= 2:
+        left_items  = [s.strip() for s in re.split(r'[;•]', inline[0][1]) if s.strip()][:6]
+        right_items = [s.strip() for s in re.split(r'[;•]', inline[1][1]) if s.strip()][:6]
+        if len(left_items) >= 2 and len(right_items) >= 2:
+            return {
+                'left_label': _clean(inline[0][0]),
+                'left_items': left_items,
+                'right_label': _clean(inline[1][0]),
+                'right_items': right_items,
+            }
+
+    return None
+
+
+def _is_pro_con_label(label: str) -> str:
+    """
+    Classifie un label de colonne versus :
+    'pro'  → avantages / après / moderne / ...  (vert)
+    'con'  → inconvénients / avant / traditionnel / ...  (orange)
+    'neutral' → n'appartient ni à l'un ni à l'autre
+    """
+    lbl = label.lower().strip()
+    pro_kw = ('après', 'apres', 'pour', 'avantages', 'bénéfices', 'benefices',
+              'forces', 'moderne', 'nouveau', 'positif', 'pros', 'pratique')
+    con_kw = ('avant', 'contre', 'inconvénients', 'inconvenients', 'faiblesses',
+              'traditionnel', 'ancien', 'négatif', 'negatif', 'cons', 'théorie',
+              'theorie', 'risques', 'limites')
+    if any(k in lbl for k in pro_kw):
+        return 'pro'
+    if any(k in lbl for k in con_kw):
+        return 'con'
+    return 'neutral'
+
+
+def _make_versus_slide(prs, title: str, left_label: str, left_items: list[str],
+                       right_label: str, right_items: list[str],
+                       section_label: str = ''):
+    """
+    Slide « versus / comparaison » deux colonnes.
+
+    Chaque colonne a son en-tête coloré distinctif (orange vs vert par défaut ;
+    accent violet si les labels sont neutres) et affiche 2 à 6 items.
+    Les items côté « con » sont marqués d'une croix ✗, ceux côté « pro » d'un ✓.
+    Un séparateur central avec badge « VS » marque la dualité.
+    """
+    left_items  = [_clean(str(x)) for x in (left_items or []) if str(x).strip()][:6]
+    right_items = [_clean(str(x)) for x in (right_items or []) if str(x).strip()][:6]
+    if not left_items or not right_items:
+        return None
+
+    slide = _content_base(prs, title, section_label)
+
+    # ── En-tête ──────────────────────────────────────────────────────
+    top_title = 0.5 if section_label else 0.18
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_COMPARE, bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    # ── Couleurs de colonnes selon classification du label ───────────
+    left_kind  = _is_pro_con_label(left_label)
+    right_kind = _is_pro_con_label(right_label)
+    # Si on a exactement un pro et un con, on applique les couleurs sémantiques
+    if {left_kind, right_kind} == {'pro', 'con'}:
+        left_color  = C_WARN    if left_kind == 'con' else C_SUCCESS
+        right_color = C_SUCCESS if right_kind == 'pro' else C_WARN
+        left_bullet  = '✗' if left_kind == 'con' else '✓'
+        right_bullet = '✓' if right_kind == 'pro' else '✗'
+    else:
+        # Labels neutres : on reste sur la palette accent (pas de sémantique)
+        left_color  = C_ACCENT
+        right_color = C_ACCENT2
+        left_bullet  = '◆'
+        right_bullet = '◆'
+
+    # ── Zone deux colonnes ───────────────────────────────────────────
+    body_top = sep_top + 0.35
+    body_bot = 7.15
+    body_h   = body_bot - body_top
+
+    col_gap     = 0.50
+    total_w     = 13.33 - 0.44 - col_gap          # après side-pad 0.22 * 2
+    col_w       = total_w / 2
+    left_x      = 0.22
+    right_x     = left_x + col_w + col_gap
+    center_x    = left_x + col_w + col_gap / 2
+
+    header_h    = 0.60
+
+    def _render_column(x, label, items, color, bullet):
+        # Bandeau titre coloré
+        hdr = _rect(slide, x, body_top, col_w, header_h, color)
+        _fill_gradient(hdr, [(0, color), (100, C_ACCENT_DARK)], angle_deg=0)
+        _add_shadow(hdr, blur_pt=8, dist_pt=2, alpha_pct=40, dir_deg=90)
+        tb = _tb(slide, x, body_top, col_w, header_h)
+        tfh = tb.text_frame
+        tfh.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tfh.margin_left = Inches(0.15)
+        tfh.margin_right = Inches(0.15)
+        ph = tfh.paragraphs[0]
+        ph.alignment = PP_ALIGN.CENTER
+        run = ph.add_run()
+        run.text = (label or '').upper()
+        _run_fmt(run, 16, C_WHITE, bold=True, font=FONT_DISPLAY)
+
+        # Liste des items
+        items_top = body_top + header_h + 0.20
+        items_h   = body_h - header_h - 0.20
+        n = len(items)
+        # Police adaptative : 2-3 → 16pt ; 4 → 14pt ; 5-6 → 12pt
+        if n <= 3:
+            item_pt, lead_pt = 16, 17
+            item_gap = 0.18
+        elif n == 4:
+            item_pt, lead_pt = 14, 15
+            item_gap = 0.14
+        else:
+            item_pt, lead_pt = 12, 13
+            item_gap = 0.10
+
+        row_h = (items_h - item_gap * (n - 1)) / n
+        for i, it in enumerate(items):
+            y = items_top + i * (row_h + item_gap)
+            # Carte fond subtile par item (améliore la lisibilité)
+            card = _rounded_rect(slide, x + 0.05, y, col_w - 0.10, row_h, C_BG_CARD)
+            _fill_gradient(card, [(0, C_ACCENT_DARK), (100, C_BG_CARD)], angle_deg=0)
+
+            # Chip bullet (coche ou croix selon pro/con)
+            chip_d = min(0.40, row_h - 0.10)
+            _icon_chip(slide, x + 0.15, y + (row_h - chip_d) / 2, chip_d,
+                       bullet, bg_color=color, glyph_size_pt=int(chip_d * 22))
+
+            # Texte item — lead:corps détecté si présent
+            text_left = x + 0.20 + chip_d + 0.20
+            text_w    = col_w - (text_left - x) - 0.15
+            tb = _tb(slide, text_left, y, text_w, row_h)
+            tfi = tb.text_frame
+            tfi.word_wrap = True
+            tfi.vertical_anchor = MSO_ANCHOR.MIDDLE
+            tfi.margin_left = Inches(0.04)
+            tfi.margin_right = Inches(0.04)
+            tfi.margin_top = Inches(0)
+            tfi.margin_bottom = Inches(0)
+            p_i = tfi.paragraphs[0]
+
+            lead, rest = '', it
+            mb = re.match(r'^\*\*(.+?)\*\*\s*[:：]?\s*(.*)', it)
+            if mb and mb.group(2).strip():
+                lead = _clean(mb.group(1))
+                rest = _clean(mb.group(2))
+
+            if lead:
+                rv = p_i.add_run()
+                rv.text = lead + ' '
+                _run_fmt(rv, lead_pt, C_WHITE, bold=True, font=FONT_DISPLAY)
+                _add_runs(p_i, rest, item_pt, C_TEXT_LIGHT)
+            else:
+                _add_runs(p_i, it, item_pt, C_TEXT_LIGHT, base_bold=False)
+
+    _render_column(left_x, left_label, left_items, left_color, left_bullet)
+    _render_column(right_x, right_label, right_items, right_color, right_bullet)
+
+    # ── Séparateur central + badge « VS » ────────────────────────────
+    vs_d = 0.70
+    vs_y = body_top + (body_h - vs_d) / 2
+    vs_x = center_x - vs_d / 2
+
+    # Trait pointillé haut + bas autour du badge
+    _rect(slide, center_x - 0.01, body_top + header_h + 0.15,
+          0.02, vs_y - body_top - header_h - 0.15, C_ACCENT_MID)
+    _rect(slide, center_x - 0.01, vs_y + vs_d,
+          0.02, body_bot - vs_y - vs_d - 0.05, C_ACCENT_MID)
+
+    # Badge circulaire « VS »
+    vs_chip = _rounded_rect(slide, vs_x, vs_y, vs_d, vs_d, C_ACCENT)
+    _fill_gradient(vs_chip, [(0, C_ACCENT), (100, C_ACCENT_DARK)], angle_deg=135)
+    _add_shadow(vs_chip, blur_pt=10, dist_pt=3, alpha_pct=50, dir_deg=90)
+    tb_vs = _tb(slide, vs_x, vs_y, vs_d, vs_d)
+    tfv = tb_vs.text_frame
+    tfv.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tfv.margin_left = Inches(0)
+    tfv.margin_right = Inches(0)
+    pv = tfv.paragraphs[0]
+    pv.alignment = PP_ALIGN.CENTER
+    rv = pv.add_run()
+    rv.text = 'VS'
+    _run_fmt(rv, 20, C_WHITE, bold=True, font=FONT_DISPLAY)
 
     return slide
 
@@ -2177,6 +2578,26 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=titre)
 
+        elif layout in ('versus', 'comparison', 'compare', 'comparaison', 'vs'):
+            # Versus / comparaison : deux colonnes avec en-têtes colorés
+            # (vert/orange si sémantique pro/con, accent violet sinon).
+            # Champs tolérés (souples) :
+            #   {'left_label', 'left_items', 'right_label', 'right_items'}
+            #   ou {'avant': {...}, 'apres': {...}} (avec label+items)
+            ll = (contenu.get('left_label') or contenu.get('gauche')
+                  or (contenu.get('avant') or {}).get('label') or 'Avant')
+            li = (contenu.get('left_items') or contenu.get('items_gauche')
+                  or (contenu.get('avant') or {}).get('items') or [])
+            rl = (contenu.get('right_label') or contenu.get('droite')
+                  or (contenu.get('apres') or {}).get('label') or 'Après')
+            ri = (contenu.get('right_items') or contenu.get('items_droite')
+                  or (contenu.get('apres') or {}).get('items') or [])
+            li = [str(x) for x in li if str(x).strip()]
+            ri = [str(x) for x in ri if str(x).strip()]
+            if li and ri:
+                if _make_versus_slide(prs, titre, str(ll), li, str(rl), ri) is None:
+                    _make_two_column_slide(prs, titre, li + ri)
+
         elif layout in ('objectives', 'objectifs', 'goals', 'learning-objectives'):
             # Objectifs pédagogiques : liste de compétences visées (3 à 6).
             # Champs tolérés : 'objectifs', 'items', 'goals', 'competences'.
@@ -2268,6 +2689,20 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
     SEC_STEPPER = {'étapes', 'etapes', 'procédure', 'procedure',
                    'démarche', 'demarche', 'processus', 'méthodologie',
                    'methodologie', 'phases', 'étapes clés', 'cycle de vie'}
+    # Mots-clés déclenchant une slide "KPI / chiffres clés"
+    SEC_KPI = {'chiffres clés', 'chiffres cles', 'kpi', 'indicateurs clés',
+               'indicateurs cles', 'statistiques clés', 'statistiques cles',
+               'quelques chiffres', 'en chiffres', 'données chiffrées',
+               'donnees chiffrees', 'le marché en chiffres',
+               'le marche en chiffres'}
+    # Mots-clés déclenchant une slide "versus / comparaison"
+    SEC_VERSUS = {'avant / après', 'avant/après', 'avant apres', 'avant-après',
+                  'avant-apres', ' versus ', 'versus', ' vs ',
+                  'pour et contre', 'avantages et inconvénients',
+                  'avantages et inconvenients', 'forces et faiblesses',
+                  'traditionnel vs moderne', 'traditionnel / moderne',
+                  'ancien vs nouveau', 'théorie vs pratique',
+                  'theorie vs pratique'}
     # Mots-clés déclenchant une slide "Objectifs pédagogiques" (tête de chapitre).
     # Volontairement spécifiques : 'objectifs' bare matcherait « Objectifs
     # commerciaux / marketing » dans le corps d'un cours — à proscrire.
@@ -2331,6 +2766,22 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                 _record_toc()
                 continue
 
+        # ── KPI / chiffres clés ───────────────────────────────────────
+        # Déclenchement : mot-clé titre OU auto-détection (>=50% des bullets
+        # sont des pourcentages/montants). Cascade vers progress-bars si tous
+        # en %, bar-chart si au moins 2 numériques, sinon cartes texte.
+        if any(kw in h2_lower for kw in SEC_KPI) or _looks_like_kpi(section_body):
+            kpis = _parse_kpi_bullets(section_body, max_n=4)
+            if len(kpis) >= 2:
+                # Convertit au format attendu par _make_stat_slide et cie
+                stats = [{'valeur': k['valeur'], 'label': k['label']} for k in kpis]
+                if _make_progress_slide(prs, h2_title, stats) is None:
+                    if _make_stat_chart_slide(prs, h2_title, stats) is None:
+                        _make_stat_slide(prs, h2_title, stats)
+                _record_toc()
+                continue
+            # Sinon on retombe sur le dispatch classique
+
         if any(kw in h2_lower for kw in SEC_DEF):
             items = _parse_definitions(section_body)
             if items:
@@ -2365,6 +2816,20 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                 _make_callout_slide(prs, quote, attribution, section_label=h2_title)
                 _record_toc()
                 continue
+
+        # ── Versus / comparaison (2 colonnes sémantiques) ─────────────
+        # Déclenchement : mot-clé titre. Structure du corps détectée par
+        # `_parse_versus` (2 H3 / 2-col table / pattern inline).
+        if any(kw in h2_lower for kw in SEC_VERSUS):
+            parsed = _parse_versus(section_body)
+            if parsed and _make_versus_slide(
+                prs, h2_title,
+                parsed['left_label'], parsed['left_items'],
+                parsed['right_label'], parsed['right_items'],
+            ) is not None:
+                _record_toc()
+                continue
+            # Sinon : fallback sur le dispatch classique
 
         # Stepper : titre déclencheur OU contenu principalement en liste numérotée
         if any(kw in h2_lower for kw in SEC_STEPPER) or _looks_like_steps(section_body):
