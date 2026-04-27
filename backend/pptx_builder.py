@@ -72,6 +72,9 @@ CHIP_RECAP   = '✦'   # synthèse / à retenir (distinct de CHIP_PTS='★')
 CHIP_CHECK   = '✓'   # marqueur de validation devant chaque objectif
 CHIP_TIMELINE = '→'  # frise chronologique / timeline (évoque la progression)
 
+# Marque affichée dans le pied de page (badge gauche). À adapter par école.
+BRAND_LABEL = 'IESIG'
+
 # Motif de fond subtil (appliqué à toutes les slides de contenu via _content_base).
 # Presets DrawingML les plus adaptés à un fond sombre :
 #   'smGrid'    : grille fine (aspect technique/académique)
@@ -699,55 +702,115 @@ def _add_shadow(shape, blur_pt: int = 8, dist_pt: int = 4,
     return shape
 
 
-def _add_footer(slide, left_text: str, page_num: int, total: int):
+def _add_footer(slide, brand: str, breadcrumb: str, page_num: int, total: int):
     """
-    Pied de page minimaliste : module · chapitre à gauche, "n / N" à droite.
-    Typographie 9pt gris muted, sans ligne ni barre pour rester discret.
+    Pied de page institutionnel à 3 zones :
+
+      [BADGE]   spécialité › module › chapitre                    07 / 28
+      ─────────────────────────────────────────────────────────────────────
+
+    - Badge gauche : marque (IESIG par défaut), pill arrondi accent
+    - Centre : breadcrumb hiérarchique avec séparateurs U+203A
+    - Droite : numéro de page courant en gras accent + total muted
+    - Trait fin C_ACCENT_MID au-dessus, sur toute la largeur utile
     """
-    footer_y = 7.30
-    footer_h = 0.18
+    footer_y = 7.28
+    footer_h = 0.20
 
-    # Zone gauche : module · chapitre
-    tb_l = _tb(slide, 0.35, footer_y, 9.5, footer_h)
-    tf_l = tb_l.text_frame
-    tf_l.margin_left   = Inches(0)
-    tf_l.margin_right  = Inches(0)
-    tf_l.margin_top    = Inches(0)
-    tf_l.margin_bottom = Inches(0)
-    tf_l.word_wrap = False
-    p_l = tf_l.paragraphs[0]
-    p_l.alignment = PP_ALIGN.LEFT
-    run_l = p_l.add_run()
-    run_l.text = left_text
-    _run_fmt(run_l, 9, C_TEXT_MUTED, font=FONT_BODY)
+    # Trait séparateur très fin au-dessus du footer
+    _rect(slide, 0.35, footer_y - 0.10, 12.63, 0.012, C_ACCENT_MID)
 
-    # Zone droite : pagination
-    tb_r = _tb(slide, 10.5, footer_y, 2.63, footer_h)
+    # ── Badge marque (gauche) ────────────────────────────────────────
+    if brand:
+        bw = max(0.55, len(brand) * 0.085 + 0.20)
+        pill = _rounded_rect(slide, 0.35, footer_y, bw, footer_h, C_ACCENT)
+        _add_shadow(pill, blur_pt=4, dist_pt=1, alpha_pct=30, dir_deg=90)
+        tb_b = _tb(slide, 0.35, footer_y, bw, footer_h)
+        tf_b = tb_b.text_frame
+        tf_b.margin_left   = Inches(0.04)
+        tf_b.margin_right  = Inches(0.04)
+        tf_b.margin_top    = Inches(0)
+        tf_b.margin_bottom = Inches(0)
+        tf_b.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf_b.word_wrap = False
+        p_b = tf_b.paragraphs[0]
+        p_b.alignment = PP_ALIGN.CENTER
+        run_b = p_b.add_run()
+        run_b.text = brand
+        _run_fmt(run_b, 8, C_WHITE, bold=True, font=FONT_DISPLAY)
+        crumb_left = 0.35 + bw + 0.20
+    else:
+        crumb_left = 0.35
+
+    # ── Breadcrumb (centre, aligné gauche après le badge) ────────────
+    crumb_w = 9.3 - crumb_left
+    if crumb_w > 0.5 and breadcrumb:
+        tb_c = _tb(slide, crumb_left, footer_y, crumb_w, footer_h)
+        tf_c = tb_c.text_frame
+        tf_c.margin_left   = Inches(0.02)
+        tf_c.margin_right  = Inches(0.02)
+        tf_c.margin_top    = Inches(0)
+        tf_c.margin_bottom = Inches(0)
+        tf_c.word_wrap = False
+        tf_c.vertical_anchor = MSO_ANCHOR.MIDDLE
+        p_c = tf_c.paragraphs[0]
+        p_c.alignment = PP_ALIGN.LEFT
+        run_c = p_c.add_run()
+        run_c.text = breadcrumb
+        _run_fmt(run_c, 9, C_TEXT_MUTED, font=FONT_BODY)
+
+    # ── Pagination (droite) ──────────────────────────────────────────
+    # Numéro courant en gras accent, séparateur "/" et total en muted.
+    # Cette hiérarchie typographique met l'accent sur "où on en est".
+    tb_r = _tb(slide, 9.7, footer_y, 3.28, footer_h)
     tf_r = tb_r.text_frame
     tf_r.margin_left   = Inches(0)
-    tf_r.margin_right  = Inches(0)
+    tf_r.margin_right  = Inches(0.04)
     tf_r.margin_top    = Inches(0)
     tf_r.margin_bottom = Inches(0)
     tf_r.word_wrap = False
+    tf_r.vertical_anchor = MSO_ANCHOR.MIDDLE
     p_r = tf_r.paragraphs[0]
     p_r.alignment = PP_ALIGN.RIGHT
-    run_r = p_r.add_run()
-    run_r.text = f"{page_num} / {total}"
-    _run_fmt(run_r, 9, C_TEXT_MUTED, font=FONT_BODY)
+    run_pn = p_r.add_run()
+    run_pn.text = str(page_num)
+    _run_fmt(run_pn, 11, C_ACCENT2, bold=True, font=FONT_DISPLAY)
+    run_sep = p_r.add_run()
+    run_sep.text = ' / '
+    _run_fmt(run_sep, 9, C_TEXT_MUTED, font=FONT_BODY)
+    run_tot = p_r.add_run()
+    run_tot.text = str(total)
+    _run_fmt(run_tot, 9, C_TEXT_MUTED, font=FONT_BODY)
 
 
-def _apply_footers(prs, module: str, chapitre: str):
-    """Ajoute le pied de page à toutes les slides sauf la slide titre (index 0)."""
+def _apply_footers(prs, specialite: str, module: str, chapitre: str,
+                   skip_indices: set | None = None):
+    """
+    Ajoute le pied de page institutionnel à toutes les slides de contenu.
+
+    Skip systématique :
+      - slide 0 (titre, full-bleed avec composition dédiée)
+      - indices passés dans `skip_indices` (slides de section, qui ont
+        leur propre bande basse C_ACCENT_DARK qui jurerait avec le footer)
+    """
+    if skip_indices is None:
+        skip_indices = set()
+
     slides_list = list(prs.slides)
     total = len(slides_list)
-    left_text = f"{module}  ·  {chapitre}"
-    # Limite de largeur au cas où la combinaison est très longue
-    if len(left_text) > 110:
-        left_text = left_text[:107] + '…'
+
+    # Breadcrumb : spécialité › module › chapitre (› = U+203A)
+    parts = [p.strip() for p in (specialite, module, chapitre) if p and str(p).strip()]
+    breadcrumb = '  ›  '.join(parts)
+    if len(breadcrumb) > 105:
+        breadcrumb = breadcrumb[:102] + '…'
+
     for i, slide in enumerate(slides_list):
-        if i == 0:  # slide titre : composition dédiée, pas de footer
+        if i == 0:
             continue
-        _add_footer(slide, left_text, i + 1, total)
+        if i in skip_indices:
+            continue
+        _add_footer(slide, BRAND_LABEL, breadcrumb, i + 1, total)
 
 
 def _icon_chip(slide, left: float, top: float, size: float, glyph: str,
@@ -2718,6 +2781,7 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
     toc_entries = []  # [(titre_section, slide_section), ...]
 
     section_counter_v2 = 0
+    section_slide_indices = set()  # indices à exclure du footer (full-bleed)
 
     for slide_data in slides:
         slide_type = slide_data.get('type', 'content')
@@ -2740,6 +2804,7 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
         if slide_type == 'section':
             section_counter_v2 += 1
             _make_section_slide(prs, titre, numero=section_counter_v2)
+            section_slide_indices.add(len(prs.slides) - 1)
             toc_entries.append((titre, prs.slides[-1]))
             continue
 
@@ -2926,15 +2991,22 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if fallback:
                 _make_content_slide(prs, titre, fallback, is_bullets=True)
 
-    # Remplit ou supprime la slide sommaire selon le nombre de sections captées
+    # Remplit ou supprime la slide sommaire selon le nombre de sections captées.
+    # Si on supprime la TOC, les indices section décalent vers le haut de 1.
+    toc_removed = False
     if toc_slide is not None:
         if len(toc_entries) >= 2:
             _fill_toc_slide(toc_slide, toc_entries)
         else:
             _remove_slide(prs, toc_slide)
+            toc_removed = True
 
-    # Pied de page sur toutes les slides sauf la titre
-    _apply_footers(prs, module, chapitre)
+    if toc_removed:
+        # La TOC était à l'index 1 ; chaque slide après recule de 1
+        section_slide_indices = {i - 1 if i > 1 else i for i in section_slide_indices}
+
+    _apply_footers(prs, specialite, module, chapitre,
+                   skip_indices=section_slide_indices)
 
     buf = BytesIO()
     prs.save(buf)
@@ -3006,6 +3078,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                  'l’essentiel'}
 
     section_counter = 0
+    section_slide_indices = set()  # indices à exclure du footer (slides full-bleed)
 
     for section in re.split(r'\n(?=## )', contenu):
         section = section.strip()
@@ -3140,6 +3213,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
 
         section_counter += 1
         _make_section_slide(prs, h2_title, numero=section_counter)
+        section_slide_indices.add(len(prs.slides) - 1)
 
         subsections    = [s.strip() for s in re.split(r'\n(?=### )', section_body) if s.strip()]
         has_subsections = any(s.startswith('###') for s in subsections)
@@ -3200,14 +3274,20 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
         # Fin du bloc par fall-through (section slide + subsections / bullets)
         _record_toc()
 
-    # Remplit ou supprime la slide sommaire selon les entrées collectées
+    # Remplit ou supprime la slide sommaire selon les entrées collectées.
+    # Si on supprime la TOC (idx 1), tous les indices > 1 reculent de 1.
+    toc_removed = False
     if len(toc_entries) >= 2:
         _fill_toc_slide(toc_slide, toc_entries)
     else:
         _remove_slide(prs, toc_slide)
+        toc_removed = True
 
-    # Pied de page sur toutes les slides sauf la titre
-    _apply_footers(prs, module, chapitre)
+    if toc_removed:
+        section_slide_indices = {i - 1 if i > 1 else i for i in section_slide_indices}
+
+    _apply_footers(prs, specialite, module, chapitre,
+                   skip_indices=section_slide_indices)
 
     buf = BytesIO()
     prs.save(buf)
