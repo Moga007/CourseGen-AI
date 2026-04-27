@@ -70,6 +70,7 @@ CHIP_STEPS   = '⇣'   # processus séquentiel / stepper vertical
 CHIP_GOAL    = '◎'   # objectifs pédagogiques (cible / visée)
 CHIP_RECAP   = '✦'   # synthèse / à retenir (distinct de CHIP_PTS='★')
 CHIP_CHECK   = '✓'   # marqueur de validation devant chaque objectif
+CHIP_TIMELINE = '→'  # frise chronologique / timeline (évoque la progression)
 
 # Motif de fond subtil (appliqué à toutes les slides de contenu via _content_base).
 # Presets DrawingML les plus adaptés à un fond sombre :
@@ -343,6 +344,110 @@ def _parse_kpi_bullets(text: str, max_n: int = 4) -> list[dict]:
         if len(out) >= max_n:
             break
     return out
+
+
+# Token date pour timeline : 4 chiffres (1995), 1995s, 1990-2000, "années 90",
+# mois français + année, Q1 2020.
+_TIMELINE_DATE_TOKEN = (
+    r'(?:\d{4}(?:s|\s*[-–]\s*\d{2,4})?'
+    r'|années?\s+\d{2,4}'
+    r'|(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|'
+    r'septembre|octobre|novembre|décembre|decembre)\s+\d{4}'
+    r'|q[1-4]\s+\d{4})'
+)
+
+# Cas A : - **2020 : Titre** : description (date + titre dans le gras)
+_TIMELINE_RE_COMBO = re.compile(
+    r'^\s*[-*•]\s*\*\*\s*(' + _TIMELINE_DATE_TOKEN + r'[^*]*?)\s*\*\*'
+    r'\s*[:：\-–—]?\s*(.*)$',
+    re.IGNORECASE,
+)
+# Cas B : - **2020** : titre — description  /  - 2020 — titre : description
+_TIMELINE_RE_SPLIT = re.compile(
+    r'^\s*[-*•]\s*(?:\*\*)?(' + _TIMELINE_DATE_TOKEN + r')(?:\*\*)?'
+    r'\s*[:：\-–—]\s*(.+)$',
+    re.IGNORECASE,
+)
+
+
+def _parse_timeline(text: str, max_n: int = 7) -> list[dict]:
+    """
+    Parse une liste d'événements datés (frise chronologique).
+
+    Patterns supportés :
+        - **1995** : Création de Yahoo!
+        - 1995 — Création de Yahoo!
+        - **2010 : Avènement du mobile** : 50% du trafic web
+        - 1990s — Décennie de l'expansion
+        - **Années 90** : massification d'Internet
+        - **Janvier 2020** : COVID et bascule digitale
+
+    Retourne [{'date': str, 'titre': str, 'description': str}, ...].
+    """
+    out = []
+    for raw in text.split('\n'):
+        line = raw.strip()
+        if not line:
+            continue
+
+        # Cas A : ** englobe date + titre
+        mc = _TIMELINE_RE_COMBO.match(line)
+        if mc:
+            combo = _clean(mc.group(1))
+            # Sépare la date du reste : "2020 : Titre" ou "2020 — Titre"
+            ms = re.match(
+                r'^(' + _TIMELINE_DATE_TOKEN + r')\s*[:：\-–—]?\s*(.*)$',
+                combo, re.IGNORECASE,
+            )
+            if ms:
+                date  = ms.group(1).strip()
+                titre = ms.group(2).strip() or ''
+            else:
+                date  = combo
+                titre = ''
+            desc = _clean(mc.group(2))
+            if not titre and desc:
+                # Si pas de titre interne, le reste après ** devient le titre
+                titre, desc = desc, ''
+            out.append({'date': date, 'titre': titre, 'description': desc})
+            if len(out) >= max_n:
+                break
+            continue
+
+        # Cas B : date au début, séparateur, suite de la ligne
+        ms = _TIMELINE_RE_SPLIT.match(line)
+        if ms:
+            date = _clean(ms.group(1))
+            rest = _clean(ms.group(2))
+            # rest peut contenir un sous-titre gras
+            mt = re.match(r'^\*\*(.+?)\*\*\s*[:：\-–—]?\s*(.*)', rest)
+            if mt:
+                titre = _clean(mt.group(1))
+                desc  = _clean(mt.group(2))
+            else:
+                # Sépare titre/description sur " : " ou " — "
+                titre, desc = rest, ''
+                for sep in (' : ', ' — ', ' – '):
+                    if sep in rest:
+                        titre, desc = rest.split(sep, 1)
+                        titre, desc = _clean(titre), _clean(desc)
+                        break
+            out.append({'date': date, 'titre': titre, 'description': desc})
+            if len(out) >= max_n:
+                break
+    return out
+
+
+def _looks_like_timeline(text: str) -> bool:
+    """
+    True si >=3 bullets et au moins 60% sont des événements datés
+    (heuristique pour auto-détecter une frise sans mot-clé dans le titre).
+    """
+    bullets = [l for l in text.split('\n') if re.match(r'^\s*[-*•]', l.strip())]
+    if len(bullets) < 3:
+        return False
+    events = _parse_timeline(text, max_n=20)
+    return len(events) >= 3 and len(events) >= 0.6 * len(bullets)
 
 
 def _looks_like_kpi(text: str) -> bool:
@@ -1673,6 +1778,159 @@ def _make_synthese_slide(prs, items: list[str], section_label: str = ''):
     return slide
 
 
+def _make_timeline_slide(prs, title: str, events: list, section_label: str = ''):
+    """
+    Frise chronologique horizontale : 2 à 7 événements datés.
+
+    Rendu : ligne horizontale au centre vertical, chips numérotés sur la
+    ligne, dates en couleur accent2 au-dessus, titres + descriptions en
+    dessous. Mise en page adaptative selon le nombre d'événements.
+
+    events : liste de dicts {'date', 'titre', 'description'} ou de strings
+    (titres seuls). Retourne None si moins de 2 événements exploitables.
+    """
+    # Normalisation
+    norm = []
+    for e in (events or []):
+        if isinstance(e, dict):
+            date  = _clean(str(e.get('date') or e.get('annee') or e.get('année')
+                                or e.get('year') or ''))
+            titre = _clean(str(e.get('titre') or e.get('title')
+                                or e.get('event') or ''))
+            desc  = _clean(str(e.get('description') or e.get('desc') or ''))
+        else:
+            date, titre, desc = '', _clean(str(e)), ''
+        if date or titre or desc:
+            norm.append({'date': date, 'titre': titre, 'description': desc})
+    if len(norm) < 2:
+        return None
+    events_n = norm[:7]
+    n = len(events_n)
+
+    slide = _content_base(prs, title, section_label)
+
+    # ── En-tête : chip flèche + titre + séparateur ─────────────────
+    top_title = 0.5 if section_label else 0.18
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_TIMELINE,
+               bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    # ── Géométrie de la frise ──────────────────────────────────────
+    body_top = sep_top + 0.30
+    body_bot = 7.15
+
+    # La ligne horizontale est positionnée à ~40% depuis le haut du body :
+    # plus d'espace en bas pour titres + descriptions (qui sont plus longs).
+    line_y = body_top + (body_bot - body_top) * 0.36
+
+    # Marges latérales pour respirer en bord de slide
+    side_pad   = 0.55
+    line_left  = side_pad
+    line_right = 13.33 - side_pad
+    line_w     = line_right - line_left
+
+    # Tailles adaptatives selon n
+    if n <= 3:
+        chip_d, date_pt, title_pt, desc_pt, desc_max = 0.62, 22, 17, 12, 220
+    elif n == 4:
+        chip_d, date_pt, title_pt, desc_pt, desc_max = 0.52, 19, 15, 11, 140
+    elif n == 5:
+        chip_d, date_pt, title_pt, desc_pt, desc_max = 0.45, 17, 14, 10, 100
+    elif n == 6:
+        chip_d, date_pt, title_pt, desc_pt, desc_max = 0.40, 15, 12, 10, 75
+    else:  # 7
+        chip_d, date_pt, title_pt, desc_pt, desc_max = 0.36, 13, 11, 9, 55
+
+    # Ligne principale (rectangle fin avec dégradé violet → accent → violet)
+    line_h = 0.06
+    line   = _rect(slide, line_left, line_y - line_h / 2, line_w, line_h,
+                   C_ACCENT_MID)
+    _fill_gradient(line, [
+        (0,   C_ACCENT_DARK),
+        (50,  C_ACCENT),
+        (100, C_ACCENT_DARK),
+    ], angle_deg=0)
+
+    # Positions horizontales des chips (équidistantes ; centré si n=1 — exclu)
+    if n == 1:
+        positions = [line_left + line_w / 2]
+    else:
+        positions = [line_left + line_w * i / (n - 1) for i in range(n)]
+
+    # Largeur de la "colonne" allouée à chaque événement (texte au-dessus/dessous)
+    col_w = line_w / n
+    col_w = min(col_w, 2.6)        # plafond pour éviter du texte trop étiré
+    col_w = max(col_w, 1.2)        # plancher pour rester lisible
+
+    # ── Pour chaque événement ──────────────────────────────────────
+    for i, ev in enumerate(events_n):
+        cx = positions[i]
+
+        # Date au-dessus de la ligne ─────────────────────────────────
+        date_h = 0.45
+        date_y = line_y - chip_d / 2 - 0.08 - date_h
+        date_x = cx - col_w / 2
+        tb_date = _tb(slide, date_x, date_y, col_w, date_h)
+        tf_d = tb_date.text_frame
+        tf_d.word_wrap = True
+        tf_d.vertical_anchor = MSO_ANCHOR.BOTTOM
+        tf_d.margin_left  = Inches(0.02)
+        tf_d.margin_right = Inches(0.02)
+        tf_d.margin_top    = Inches(0)
+        tf_d.margin_bottom = Inches(0)
+        p_d = tf_d.paragraphs[0]
+        p_d.alignment = PP_ALIGN.CENTER
+        run_d = p_d.add_run()
+        run_d.text = ev['date'] or '—'
+        _run_fmt(run_d, date_pt, C_ACCENT2, bold=True, font=FONT_DISPLAY)
+
+        # Petit tiret entre la date et le chip (renforce le lien visuel)
+        tick_top = date_y + date_h
+        tick_h   = (line_y - chip_d / 2) - tick_top - 0.02
+        if tick_h > 0:
+            _rect(slide, cx - 0.012, tick_top, 0.024, tick_h, C_ACCENT_MID)
+
+        # Chip numéroté sur la ligne ─────────────────────────────────
+        _icon_chip(slide, cx - chip_d / 2, line_y - chip_d / 2, chip_d,
+                   str(i + 1), bg_color=C_ACCENT,
+                   glyph_size_pt=int(chip_d * 26))
+
+        # Titre + description en dessous ─────────────────────────────
+        text_top = line_y + chip_d / 2 + 0.18
+        text_h   = body_bot - text_top - 0.05
+        text_x   = cx - col_w / 2
+        tb_t = _tb(slide, text_x, text_top, col_w, text_h)
+        tf_t = tb_t.text_frame
+        tf_t.word_wrap = True
+        tf_t.vertical_anchor = MSO_ANCHOR.TOP
+        tf_t.margin_left  = Inches(0.04)
+        tf_t.margin_right = Inches(0.04)
+        tf_t.margin_top    = Inches(0)
+        tf_t.margin_bottom = Inches(0)
+
+        if ev['titre']:
+            p_t = tf_t.paragraphs[0]
+            p_t.alignment = PP_ALIGN.CENTER
+            p_t.space_after = Pt(3)
+            _add_runs(p_t, ev['titre'], title_pt, C_WHITE,
+                      base_bold=True, font=FONT_DISPLAY)
+        if ev['description']:
+            p_dsc = tf_t.add_paragraph() if ev['titre'] else tf_t.paragraphs[0]
+            p_dsc.alignment = PP_ALIGN.CENTER
+            p_dsc.space_before = Pt(2)
+            _add_runs(p_dsc, _truncate(ev['description'], desc_max),
+                      desc_pt, C_TEXT_LIGHT)
+
+    return slide
+
+
 def _parse_versus(text: str) -> dict | None:
     """
     Parse un bloc « versus / comparaison » en deux colonnes.
@@ -2578,6 +2836,29 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=titre)
 
+        elif layout in ('timeline', 'chronologie', 'frise', 'history', 'historique'):
+            # Frise chronologique : 2 à 7 événements datés.
+            # Champs tolérés pour la liste : 'events', 'evenements', 'dates',
+            # 'jalons', 'items'. Chaque entrée peut être :
+            #   {'date': '1995', 'titre': '...', 'description': '...'}
+            #   ou un simple string (sera affiché comme titre seul).
+            raw = (contenu.get('events') or contenu.get('evenements')
+                   or contenu.get('événements') or contenu.get('dates')
+                   or contenu.get('jalons') or contenu.get('items') or [])
+            if raw and _make_timeline_slide(prs, titre, raw) is None:
+                # Fallback : bullets simples si la frise n'a pas pu être rendue
+                texts = []
+                for e in raw:
+                    if isinstance(e, dict):
+                        d = str(e.get('date') or '')
+                        t = str(e.get('titre') or e.get('title') or '')
+                        texts.append(f'{d} — {t}' if d and t else (t or d))
+                    else:
+                        texts.append(str(e))
+                texts = [t for t in texts if t]
+                if texts:
+                    _make_content_slide(prs, titre, texts, is_bullets=True)
+
         elif layout in ('versus', 'comparison', 'compare', 'comparaison', 'vs'):
             # Versus / comparaison : deux colonnes avec en-têtes colorés
             # (vert/orange si sémantique pro/con, accent violet sinon).
@@ -2695,6 +2976,12 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                'quelques chiffres', 'en chiffres', 'données chiffrées',
                'donnees chiffrees', 'le marché en chiffres',
                'le marche en chiffres'}
+    # Mots-clés déclenchant une slide "frise chronologique"
+    SEC_TIMELINE = {'chronologie', 'timeline', 'frise', 'frise chronologique',
+                    'historique', 'évolution historique', 'evolution historique',
+                    'dates clés', 'dates cles', 'jalons', 'jalons historiques',
+                    'étapes historiques', 'etapes historiques',
+                    'histoire de', 'genèse', 'genese'}
     # Mots-clés déclenchant une slide "versus / comparaison"
     SEC_VERSUS = {'avant / après', 'avant/après', 'avant apres', 'avant-après',
                   'avant-apres', ' versus ', 'versus', ' vs ',
@@ -2765,6 +3052,17 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             if pts and _make_synthese_slide(prs, pts) is not None:
                 _record_toc()
                 continue
+
+        # ── Frise chronologique / timeline ─────────────────────────────
+        # Déclenchement : mot-clé titre OU >=3 bullets reconnus comme dates.
+        # Placé avant KPI pour que des bullets « 1995 — ... » ne soient pas
+        # mépris pour des chiffres clés (la date est numérique).
+        if any(kw in h2_lower for kw in SEC_TIMELINE) or _looks_like_timeline(section_body):
+            events = _parse_timeline(section_body, max_n=7)
+            if len(events) >= 2:
+                if _make_timeline_slide(prs, h2_title, events) is not None:
+                    _record_toc()
+                    continue
 
         # ── KPI / chiffres clés ───────────────────────────────────────
         # Déclenchement : mot-clé titre OU auto-détection (>=50% des bullets
