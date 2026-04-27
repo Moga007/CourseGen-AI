@@ -663,7 +663,11 @@ async def list_v2_agents():
     }
 
 
-_PIPELINE_TIMEOUT = 300  # 5 minutes max pour l'ensemble du pipeline
+# Timeout global = somme des timeouts individuels des agents + buffer.
+# Avec PIPELINE_COURS = [Pedagogique 90s, Redacteur 150s, Designer 120s, Qualite 150s]
+# on obtient 510 + 90 = 600s (10 min). La valeur fixe précédente (300s) coupait
+# Qualite dès qu'un des 3 premiers agents prenait plus de ~150s.
+_PIPELINE_TIMEOUT = sum(a.timeout_seconds for a in PIPELINE_COURS) + 90
 
 
 @app.post("/generate-v2/stream")
@@ -672,7 +676,9 @@ async def generate_v2_stream(request: Request, body: GenerateV2Request):
     """
     Pipeline multi-agents V2 : 4 agents séquentiels avec SSE.
     Supporte la reprise depuis un agent échoué via resume_from + previous_results.
-    Timeout global : 5 minutes.
+
+    Timeout global : somme des timeouts agents + 90s de buffer (typiquement
+    ~600s = 10 min). Cf. _PIPELINE_TIMEOUT pour le calcul précis.
     """
     async def event_stream():
         try:
@@ -713,9 +719,12 @@ async def generate_v2_stream(request: Request, body: GenerateV2Request):
 
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except asyncio.TimeoutError:
+            mn = _PIPELINE_TIMEOUT // 60
+            sc = _PIPELINE_TIMEOUT % 60
             err_msg = (
-                f"Timeout global du pipeline ({_PIPELINE_TIMEOUT}s). "
-                f"Réessayez ou relancez depuis l'agent échoué."
+                f"Timeout global du pipeline ({_PIPELINE_TIMEOUT}s ≈ {mn}min{sc:02d}). "
+                f"Le serveur LLM est probablement saturé. Relance depuis "
+                f"l'agent échoué via le bouton « Reprendre »."
             )
             yield f"data: {json.dumps({'event': 'fatal_error', 'error': err_msg}, ensure_ascii=False)}\n\n"
         except Exception as e:
