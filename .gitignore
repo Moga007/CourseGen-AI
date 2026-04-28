@@ -7,6 +7,9 @@ historique.json
 backend/coursegen.db
 backend/*.json.migrated
 
+# Cours générés en local (artefacts par utilisateur)
+backend/Cours-md/
+
 # Claude Code
 .claude/
 
