@@ -71,6 +71,7 @@ CHIP_GOAL    = '◎'   # objectifs pédagogiques (cible / visée)
 CHIP_RECAP   = '✦'   # synthèse / à retenir (distinct de CHIP_PTS='★')
 CHIP_CHECK   = '✓'   # marqueur de validation devant chaque objectif
 CHIP_TIMELINE = '→'  # frise chronologique / timeline (évoque la progression)
+CHIP_CASE    = '▣'   # cas pratique / étude de cas (frame le sujet étudié)
 
 # Marque affichée dans le pied de page (badge gauche). À adapter par école.
 BRAND_LABEL = 'IESIG'
@@ -451,6 +452,103 @@ def _looks_like_timeline(text: str) -> bool:
         return False
     events = _parse_timeline(text, max_n=20)
     return len(events) >= 3 and len(events) >= 0.6 * len(bullets)
+
+
+# Synonymes par rôle dans un cas pratique (utilisés pour classifier les
+# H3/labels en l'une des 4 cases : contexte / problème / solution / résultat).
+_CASE_LABELS = {
+    'contexte': ('contexte', 'context', 'situation', 'cadre', 'arrière-plan',
+                 'arriere-plan', 'mise en contexte', 'cas étudié', 'cas etudie',
+                 'environnement'),
+    'probleme': ('problème', 'probleme', 'problem', 'enjeu', 'défi', 'defi',
+                 'difficulté', 'difficulte', 'challenge', 'question',
+                 'questionnement', 'point bloquant'),
+    'solution': ('solution', 'approche', 'réponse', 'reponse', 'démarche',
+                 'demarche', 'action', 'actions', 'stratégie', 'strategie',
+                 'mise en œuvre', 'mise en oeuvre', 'plan d\'action'),
+    'resultat': ('résultat', 'resultat', 'résultats', 'resultats', 'outcome',
+                 'impact', 'bilan', 'effets', 'effet', 'résolution',
+                 'resolution', 'leçons', 'lecons', 'enseignements',
+                 'retour d\'expérience', 'retour dexperience',
+                 'conclusion du cas'),
+}
+
+
+def _classify_case_label(label: str) -> str | None:
+    """Classifie un label en l'une des 4 cases du cas pratique."""
+    lbl = label.lower().strip().rstrip(':：').strip()
+    for key, kws in _CASE_LABELS.items():
+        for kw in kws:
+            if kw in lbl:
+                return key
+    return None
+
+
+def _parse_case_study(text: str) -> dict | None:
+    """
+    Parse un cas pratique en 4 cases : contexte, problème, solution, résultat.
+
+    Patterns supportés (testés dans cet ordre) :
+      1. Sous-titres H3 / H4 :
+            ### Contexte
+            <body>
+            ### Problème
+            <body>
+            ### Solution
+            <body>
+            ### Résultat
+            <body>
+
+      2. Inline gras :
+            **Contexte** : <body>
+            **Problème** : <body>
+            ...
+
+      3. Bullets gras :
+            - **Contexte** : <body>
+            - **Problème** : <body>
+            ...
+
+    Retourne {'contexte', 'probleme', 'solution', 'resultat'} dont chaque
+    valeur peut être '' si non détectée. Renvoie None si moins de 3 cases
+    sur 4 sont remplies (un cas pratique sans 3/4 c'est un faux positif).
+    """
+    out = {'contexte': '', 'probleme': '', 'solution': '', 'resultat': ''}
+
+    # Cas 1 : H3/H4
+    h3_re = re.compile(
+        r'^#{3,4}\s+(.+?)\s*$\n?(.*?)(?=^#{3,4}\s|\Z)',
+        re.MULTILINE | re.DOTALL,
+    )
+    for m in h3_re.finditer(text):
+        slot = _classify_case_label(m.group(1))
+        if slot and not out[slot]:
+            out[slot] = _clean(m.group(2)).strip()
+
+    # Cas 2 : inline **Label** : ... (sépare sur \n\n ou prochain **)
+    if not all(out.values()):
+        inline_re = re.compile(
+            r'\*\*\s*([^*\n:]+?)\s*\*\*\s*[:：]\s*(.+?)(?=\n\s*\*\*|\n\n|\Z)',
+            re.DOTALL,
+        )
+        for m in inline_re.finditer(text):
+            slot = _classify_case_label(m.group(1))
+            if slot and not out[slot]:
+                out[slot] = _clean(m.group(2)).strip()
+
+    # Cas 3 : bullets - **Label** : ...
+    if not all(out.values()):
+        for raw in text.split('\n'):
+            line = raw.strip()
+            mb = re.match(r'^[-*•]\s*\*\*([^*]+?)\*\*\s*[:：]\s*(.+)$', line)
+            if mb:
+                slot = _classify_case_label(mb.group(1))
+                if slot and not out[slot]:
+                    out[slot] = _clean(mb.group(2)).strip()
+
+    if sum(1 for v in out.values() if v) < 3:
+        return None
+    return out
 
 
 def _looks_like_kpi(text: str) -> bool:
@@ -1841,6 +1939,138 @@ def _make_synthese_slide(prs, items: list[str], section_label: str = ''):
     return slide
 
 
+def _make_case_study_slide(prs, title: str, contexte: str, probleme: str,
+                             solution: str, resultat: str,
+                             section_label: str = ''):
+    """
+    Slide « Cas pratique » : 4 cartes en grille 2x2.
+
+      ┌─────────────────────┬─────────────────────┐
+      │ 01 CONTEXTE   (mid) │ 02 PROBLÈME (warn)  │
+      │ ...........        │ ...........        │
+      ├─────────────────────┼─────────────────────┤
+      │ 03 SOLUTION (acct)  │ 04 RÉSULTAT (succ)  │
+      │ ...........        │ ...........        │
+      └─────────────────────┴─────────────────────┘
+
+    Lecture en Z (haut-gauche → haut-droit → bas-gauche → bas-droit) qui
+    correspond à la narration d'un cas : on pose le décor, on identifie
+    le problème, on raconte la solution, on mesure les résultats.
+
+    Chaque carte a son bandeau supérieur coloré sémantiquement (neutre /
+    orange / accent / vert) et un corps texte sur fond dégradé subtil.
+    Retourne None si moins de 3 cases sur 4 sont remplies.
+    """
+    cases = [
+        ('Contexte', contexte, C_ACCENT_MID, '01'),
+        ('Problème', probleme, C_WARN,       '02'),
+        ('Solution', solution, C_ACCENT,     '03'),
+        ('Résultat', resultat, C_SUCCESS,    '04'),
+    ]
+    filled = sum(1 for _, body, _, _ in cases if body and str(body).strip())
+    if filled < 3:
+        return None
+
+    slide = _content_base(prs, title, section_label)
+
+    # ── En-tête ──────────────────────────────────────────────────────
+    top_title = 0.5 if section_label else 0.18
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_CASE,
+               bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    # ── Grille 2x2 ───────────────────────────────────────────────────
+    body_top = sep_top + 0.28
+    body_bot = 7.15
+    grid_left = 0.30
+    grid_w    = 13.33 - 2 * grid_left
+    grid_h    = body_bot - body_top
+    gap       = 0.22
+    card_w    = (grid_w - gap) / 2
+    card_h    = (grid_h - gap) / 2
+
+    positions = [
+        (grid_left,                body_top),                  # 01
+        (grid_left + card_w + gap, body_top),                  # 02
+        (grid_left,                body_top + card_h + gap),   # 03
+        (grid_left + card_w + gap, body_top + card_h + gap),   # 04
+    ]
+
+    band_h = 0.55  # bandeau supérieur de la carte
+
+    for i, (label, body, color, num) in enumerate(cases):
+        x, y = positions[i]
+
+        # Carte fond + ombre portée
+        card = _rounded_rect(slide, x, y, card_w, card_h, C_BG_CARD)
+        _fill_gradient(card, [(0, C_ACCENT_DARK), (100, C_BG_CARD)],
+                       angle_deg=135)
+        _add_shadow(card, blur_pt=10, dist_pt=3, alpha_pct=40, dir_deg=90)
+
+        # Bandeau supérieur coloré (sémantique du rôle de la carte)
+        band = _rect(slide, x, y, card_w, band_h, color)
+        _fill_gradient(band, [(0, color), (100, C_ACCENT_DARK)], angle_deg=0)
+
+        # Numéro 01..04 dans le bandeau (gauche)
+        tb_num = _tb(slide, x + 0.20, y, 0.95, band_h)
+        tf_n = tb_num.text_frame
+        tf_n.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf_n.margin_left   = Inches(0)
+        tf_n.margin_right  = Inches(0)
+        tf_n.margin_top    = Inches(0)
+        tf_n.margin_bottom = Inches(0)
+        p_n = tf_n.paragraphs[0]
+        run_n = p_n.add_run()
+        run_n.text = num
+        _run_fmt(run_n, 22, C_WHITE, bold=True, font=FONT_DISPLAY)
+
+        # Label dans le bandeau (droite du numéro)
+        tb_l = _tb(slide, x + 1.10, y, card_w - 1.20, band_h)
+        tf_l = tb_l.text_frame
+        tf_l.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf_l.margin_left   = Inches(0)
+        tf_l.margin_right  = Inches(0.08)
+        tf_l.margin_top    = Inches(0)
+        tf_l.margin_bottom = Inches(0)
+        tf_l.word_wrap = False
+        p_l = tf_l.paragraphs[0]
+        run_l = p_l.add_run()
+        run_l.text = label.upper()
+        _run_fmt(run_l, 14, C_WHITE, bold=True, font=FONT_DISPLAY)
+
+        # Corps texte
+        body_y    = y + band_h + 0.18
+        body_h_tb = card_h - band_h - 0.30
+        tb_b = _tb(slide, x + 0.22, body_y, card_w - 0.44, body_h_tb)
+        tf_b = tb_b.text_frame
+        tf_b.word_wrap = True
+        tf_b.vertical_anchor = MSO_ANCHOR.TOP
+        tf_b.margin_left   = Inches(0.04)
+        tf_b.margin_right  = Inches(0.04)
+        tf_b.margin_top    = Inches(0)
+        tf_b.margin_bottom = Inches(0)
+
+        if body and str(body).strip():
+            text = _truncate(_clean(str(body)), 350)
+            p_b = tf_b.paragraphs[0]
+            _add_runs(p_b, text, 12, C_TEXT_LIGHT)
+        else:
+            # Carte vide : placeholder muted en italique
+            p_e = tf_b.paragraphs[0]
+            run_e = p_e.add_run()
+            run_e.text = '— à compléter —'
+            _run_fmt(run_e, 11, C_TEXT_MUTED, italic=True, font=FONT_BODY)
+
+    return slide
+
+
 def _make_timeline_slide(prs, title: str, events: list, section_label: str = ''):
     """
     Frise chronologique horizontale : 2 à 7 événements datés.
@@ -2901,6 +3131,34 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=titre)
 
+        elif layout in ('case', 'case-study', 'case_study', 'cas-pratique',
+                        'cas_pratique', 'cas-pratique', 'etude-cas', 'etude_de_cas'):
+            # Cas pratique : 4 cartes Contexte / Problème / Solution / Résultat.
+            # Champs tolérés (souples) — chaque case accepte plusieurs alias.
+            contexte = str(contenu.get('contexte') or contenu.get('context')
+                           or contenu.get('situation') or contenu.get('cadre') or '')
+            probleme = str(contenu.get('probleme') or contenu.get('problème')
+                           or contenu.get('problem') or contenu.get('enjeu')
+                           or contenu.get('defi') or contenu.get('défi') or '')
+            solution = str(contenu.get('solution') or contenu.get('approche')
+                           or contenu.get('action') or contenu.get('strategie')
+                           or contenu.get('stratégie') or '')
+            resultat = str(contenu.get('resultat') or contenu.get('résultat')
+                           or contenu.get('outcome') or contenu.get('impact')
+                           or contenu.get('bilan') or '')
+            if _make_case_study_slide(prs, titre, contexte, probleme,
+                                      solution, resultat) is None:
+                # Fallback : bullets simples avec labels en gras
+                items = [f'**{lbl}** : {body}' for lbl, body in (
+                    ('Contexte', contexte),
+                    ('Problème', probleme),
+                    ('Solution', solution),
+                    ('Résultat', resultat),
+                ) if body and body.strip()]
+                if items:
+                    _make_content_slide(prs, titre or 'Cas pratique',
+                                        items, is_bullets=True)
+
         elif layout in ('timeline', 'chronologie', 'frise', 'history', 'historique'):
             # Frise chronologique : 2 à 7 événements datés.
             # Champs tolérés pour la liste : 'events', 'evenements', 'dates',
@@ -3048,6 +3306,14 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                'quelques chiffres', 'en chiffres', 'données chiffrées',
                'donnees chiffrees', 'le marché en chiffres',
                'le marche en chiffres'}
+    # Mots-clés déclenchant une slide "cas pratique" (4 cartes)
+    SEC_CASE = {'cas pratique', 'cas pratiques', 'étude de cas', 'etude de cas',
+                'études de cas', 'etudes de cas', 'business case',
+                'cas concret', 'cas d\'école', 'cas decole',
+                'cas d\'application', 'mise en situation',
+                'illustration concrète', 'illustration concrete',
+                'case study', 'exemple détaillé', 'exemple detaille',
+                'situation réelle', 'situation reelle'}
     # Mots-clés déclenchant une slide "frise chronologique"
     SEC_TIMELINE = {'chronologie', 'timeline', 'frise', 'frise chronologique',
                     'historique', 'évolution historique', 'evolution historique',
@@ -3187,6 +3453,20 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                 _make_callout_slide(prs, quote, attribution, section_label=h2_title)
                 _record_toc()
                 continue
+
+        # ── Cas pratique / étude de cas (4 cartes Z-flow) ─────────────
+        # Déclenchement : mot-clé titre. Structure du corps détectée par
+        # `_parse_case_study` (H3 / labels gras / bullets gras).
+        if any(kw in h2_lower for kw in SEC_CASE):
+            case = _parse_case_study(section_body)
+            if case and _make_case_study_slide(
+                prs, h2_title,
+                case['contexte'], case['probleme'],
+                case['solution'], case['resultat'],
+            ) is not None:
+                _record_toc()
+                continue
+            # Sinon : fallback sur le dispatch classique
 
         # ── Versus / comparaison (2 colonnes sémantiques) ─────────────
         # Déclenchement : mot-clé titre. Structure du corps détectée par
