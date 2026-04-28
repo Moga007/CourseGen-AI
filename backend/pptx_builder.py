@@ -44,6 +44,7 @@ C_BULLET       = RGBColor(0x6E, 0x75, 0xF9)   # Couleur des marqueurs bullets
 # Fallback automatique vers Calibri si Aptos indisponible.
 FONT_DISPLAY = 'Aptos Display'   # Titres, grands chiffres, labels de section
 FONT_BODY    = 'Aptos'           # Corps de texte, puces, descriptions
+FONT_MONO    = 'Consolas'        # Code source (Consolas est sur tout Windows)
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
@@ -72,6 +73,7 @@ CHIP_RECAP   = '✦'   # synthèse / à retenir (distinct de CHIP_PTS='★')
 CHIP_CHECK   = '✓'   # marqueur de validation devant chaque objectif
 CHIP_TIMELINE = '→'  # frise chronologique / timeline (évoque la progression)
 CHIP_CASE    = '▣'   # cas pratique / étude de cas (frame le sujet étudié)
+CHIP_CODE    = '⌨'   # bloc de code (clavier — universellement reconnu)
 
 # Marque affichée dans le pied de page (badge gauche). À adapter par école.
 BRAND_LABEL = 'IESIG'
@@ -549,6 +551,71 @@ def _parse_case_study(text: str) -> dict | None:
     if sum(1 for v in out.values() if v) < 3:
         return None
     return out
+
+
+# Préfixes de commentaire par langage (pour mise en couleur muted automatique)
+_CODE_COMMENT_PREFIXES = {
+    'python':   ('#',),       'py':   ('#',),
+    'bash':     ('#',),       'sh':   ('#',),
+    'ruby':     ('#',),       'rb':   ('#',),
+    'r':        ('#',),
+    'yaml':     ('#',),       'yml':  ('#',),
+    'toml':     ('#',),
+    'javascript': ('//',),    'js':   ('//',),
+    'typescript': ('//',),    'ts':   ('//',),
+    'jsx':      ('//',),      'tsx':  ('//',),
+    'java':     ('//',),
+    'c':        ('//',),      'cpp':  ('//',),
+    'csharp':   ('//',),      'cs':   ('//',),
+    'go':       ('//',),
+    'rust':     ('//',),      'rs':   ('//',),
+    'php':      ('//',),
+    'swift':    ('//',),
+    'kotlin':   ('//',),      'kt':   ('//',),
+    'scala':    ('//',),
+    'sql':      ('--',),
+    'html':     ('<!--',),    'xml':  ('<!--',),
+    'css':      ('/*',),
+}
+
+
+def _is_comment_line(line: str, language: str) -> bool:
+    """True si la ligne de code est un commentaire selon le langage."""
+    prefixes = _CODE_COMMENT_PREFIXES.get(language.lower(), ())
+    if not prefixes:
+        return False
+    stripped = line.lstrip()
+    return any(stripped.startswith(p) for p in prefixes)
+
+
+def _parse_code_blocks(text: str):
+    """
+    Extrait le PREMIER bloc de code markdown ```lang ... ``` du texte.
+    Retourne {'language', 'code', 'before', 'after'} ou None si pas de bloc.
+
+    Le langage est optionnel (forme ``` ... ``` sans étiquette acceptée).
+    'before' = texte avant le bloc (utilisé comme description),
+    'after'  = texte après le bloc (rarement utilisé pour l'instant).
+    """
+    pattern = re.compile(
+        r'^```([a-zA-Z0-9_+\-]*)\s*\n(.*?)\n```\s*$',
+        re.MULTILINE | re.DOTALL,
+    )
+    m = pattern.search(text)
+    if not m:
+        return None
+    language = m.group(1).strip()
+    code = m.group(2)
+    before = text[:m.start()].strip()
+    after = text[m.end():].strip()
+    if not code.strip():
+        return None
+    return {
+        'language': language,
+        'code': code,
+        'before': before,
+        'after': after,
+    }
 
 
 def _looks_like_kpi(text: str) -> bool:
@@ -1982,6 +2049,157 @@ def _make_synthese_slide(prs, items: list[str], section_label: str = ''):
     return slide
 
 
+def _make_code_slide(prs, title: str, code: str, language: str = '',
+                       description: str = '', section_label: str = ''):
+    """
+    Slide « Bloc de code » : encadré sombre avec liséré accent à gauche,
+    police Consolas, étiquette de langage en haut à droite, optionnellement
+    une phrase d'introduction au-dessus du code.
+
+    Mise en page :
+      ┌─[python]──────────────────────────┐
+      │ ▌ def calculer_taux(brut):        │
+      │ ▌     return brut * 0.85          │
+      │ ▌                                 │
+      │ ▌ # exemple                       │  ← lignes commentaires en muted
+      │ ▌ net = calculer_taux(2500)       │
+      └───────────────────────────────────┘
+
+    Taille de police adaptative :
+      ≤12 lignes & ≤70 chars/ligne → 14pt
+      ≤20 lignes & ≤90 chars       → 12pt
+      ≤30 lignes & ≤110 chars      → 10pt
+      sinon                         → 9pt + truncate
+    """
+    code = code or ''
+    if not code.strip():
+        return None
+
+    slide = _content_base(prs, title, section_label)
+
+    # ── En-tête : chip clavier + titre + séparateur ──
+    top_title = 0.5 if section_label else 0.18
+    _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_CODE,
+               bg_color=C_ACCENT)
+    tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
+    tf = tb_title.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
+
+    sep_top = top_title + 1.0
+    _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
+
+    body_top = sep_top + 0.30
+
+    # ── Description (intro optionnelle au-dessus du code) ──
+    if description:
+        desc_h = 0.65
+        tb_desc = _tb(slide, 0.30, body_top, 12.73, desc_h)
+        tf_d = tb_desc.text_frame
+        tf_d.word_wrap = True
+        p_d = tf_d.paragraphs[0]
+        _add_runs(p_d, _truncate(description, 200), 12, C_TEXT_MUTED)
+        _enable_shrink_to_fit(tf_d)
+        body_top += desc_h + 0.10
+
+    # ── Encadré code ──
+    code_top   = body_top
+    code_bot   = 7.10
+    code_left  = 0.30
+    code_w     = 13.33 - 2 * code_left
+    code_h     = code_bot - code_top
+
+    # Fond légèrement plus sombre que C_BG_CARD pour distinguer le code
+    code_bg_color = RGBColor(0x10, 0x12, 0x22)
+    code_box = _rounded_rect(slide, code_left, code_top, code_w, code_h,
+                              code_bg_color)
+    _add_shadow(code_box, blur_pt=10, dist_pt=3, alpha_pct=45, dir_deg=90)
+
+    # Liséré gauche accent (signature visuelle « bloc de code »)
+    bar_w = 0.08
+    _rect(slide, code_left, code_top, bar_w, code_h, C_ACCENT)
+
+    # ── Étiquette langage (top-right pill) ──
+    if language:
+        lbl = language.lower()
+        lw = max(0.65, len(lbl) * 0.10 + 0.20)
+        lh = 0.30
+        lx = code_left + code_w - lw - 0.15
+        ly = code_top + 0.15
+        pill = _rounded_rect(slide, lx, ly, lw, lh, C_ACCENT_DARK)
+        tb_lang = _tb(slide, lx, ly, lw, lh)
+        tf_l = tb_lang.text_frame
+        tf_l.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf_l.margin_left  = Inches(0.04)
+        tf_l.margin_right = Inches(0.04)
+        tf_l.margin_top    = Inches(0)
+        tf_l.margin_bottom = Inches(0)
+        p_l = tf_l.paragraphs[0]
+        p_l.alignment = PP_ALIGN.CENTER
+        run_l = p_l.add_run()
+        run_l.text = lbl.upper()
+        _run_fmt(run_l, 8, C_ACCENT2, bold=True, font=FONT_DISPLAY)
+
+    # ── Texte du code ──
+    text_left_pad = bar_w + 0.20
+    text_top_pad  = 0.30 if language else 0.20
+    code_text_x   = code_left + text_left_pad
+    code_text_y   = code_top + text_top_pad
+    code_text_w   = code_w - text_left_pad - 0.20
+    code_text_h   = code_h - text_top_pad - 0.20
+
+    # Adaptation taille police selon lignes/longueur
+    lines = code.split('\n')
+    n_lines = len(lines)
+    max_line_len = max((len(l) for l in lines), default=0)
+
+    if n_lines <= 12 and max_line_len <= 70:
+        code_pt = 14
+    elif n_lines <= 20 and max_line_len <= 90:
+        code_pt = 12
+    elif n_lines <= 30 and max_line_len <= 110:
+        code_pt = 10
+    else:
+        code_pt = 9
+
+    # Cap à 35 lignes — au-delà, ajout d'un marqueur de troncature
+    truncated = False
+    if n_lines > 35:
+        lines = lines[:34] + ['... (suite tronquée)']
+        truncated = True
+
+    tb_code = _tb(slide, code_text_x, code_text_y, code_text_w, code_text_h)
+    tf_c = tb_code.text_frame
+    # On NE wrap PAS : si une ligne déborde, l'autofit la réduira via la
+    # police globale. Wrap aurait casse l'indentation et la sémantique.
+    tf_c.word_wrap = False
+    tf_c.margin_left   = Inches(0.04)
+    tf_c.margin_right  = Inches(0.04)
+    tf_c.margin_top    = Inches(0.04)
+    tf_c.margin_bottom = Inches(0.04)
+    tf_c.vertical_anchor = MSO_ANCHOR.TOP
+
+    for i, line in enumerate(lines):
+        para = tf_c.paragraphs[0] if i == 0 else tf_c.add_paragraph()
+        para.space_before = Pt(0)
+        para.space_after  = Pt(0)
+        run = para.add_run()
+        # Ligne vide → espace pour préserver la hauteur visuelle
+        run.text = line if line else ' '
+        is_comment = _is_comment_line(line, language) if line.strip() else False
+        if i == len(lines) - 1 and truncated:
+            # Marqueur de troncature en italique muted
+            _run_fmt(run, code_pt, C_TEXT_MUTED, italic=True, font=FONT_MONO)
+        else:
+            color = C_TEXT_MUTED if is_comment else C_TEXT_LIGHT
+            _run_fmt(run, code_pt, color, font=FONT_MONO)
+
+    _enable_shrink_to_fit(tf_c)
+    return slide
+
+
 def _make_case_study_slide(prs, title: str, contexte: str, probleme: str,
                              solution: str, resultat: str,
                              section_label: str = ''):
@@ -3195,6 +3413,20 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
             if quote:
                 _make_callout_slide(prs, quote, attribution, section_label=titre)
 
+        elif layout in ('code', 'code-block', 'snippet', 'codeblock'):
+            # Bloc de code : encadré sombre avec liséré accent à gauche.
+            # Champs tolérés : 'code' (le source), 'language'/'lang'
+            # (étiquette), 'description'/'intro' (phrase au-dessus).
+            code = str(contenu.get('code') or contenu.get('source') or '')
+            language = str(contenu.get('language') or contenu.get('lang') or '')
+            description = str(contenu.get('description') or contenu.get('intro')
+                              or contenu.get('explication') or '')
+            if code.strip() and _make_code_slide(prs, titre, code, language,
+                                                  description=description) is None:
+                # Fallback : on rend le code en bloc texte mono via content_slide
+                _make_content_slide(prs, titre, code.split('\n')[:12],
+                                    is_bullets=False)
+
         elif layout in ('case', 'case-study', 'case_study', 'cas-pratique',
                         'cas_pratique', 'cas-pratique', 'etude-cas', 'etude_de_cas'):
             # Cas pratique : 4 cartes Contexte / Problème / Solution / Résultat.
@@ -3370,6 +3602,14 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                'quelques chiffres', 'en chiffres', 'données chiffrées',
                'donnees chiffrees', 'le marché en chiffres',
                'le marche en chiffres'}
+    # Mots-clés déclenchant une slide "code source" (mono + liséré accent).
+    # Couvre aussi l'auto-détection : si le corps de la section contient un
+    # bloc ``` et que ce bloc fait >40% du texte, on déclenche aussi.
+    SEC_CODE = {'code', 'extrait de code', 'extrait code', 'snippet',
+                'exemple de code', 'exemple code', 'implémentation',
+                'implementation', 'pseudocode', 'pseudo-code',
+                'pseudo code', 'syntaxe', 'illustration code',
+                'requête sql', 'requete sql', 'script', 'commande'}
     # Mots-clés déclenchant une slide "cas pratique" (4 cartes)
     SEC_CASE = {'cas pratique', 'cas pratiques', 'étude de cas', 'etude de cas',
                 'études de cas', 'etudes de cas', 'business case',
@@ -3517,6 +3757,23 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
                 _make_callout_slide(prs, quote, attribution, section_label=h2_title)
                 _record_toc()
                 continue
+
+        # ── Bloc de code source ───────────────────────────────────────
+        # Déclenchement : mot-clé titre OU corps contenant un bloc ``` qui
+        # represente >40% des caractères du body (auto-détection : la
+        # section est centrée sur le code, pas sur du texte explicatif).
+        cb = _parse_code_blocks(section_body)
+        cb_dominant = (cb is not None
+                       and len(cb['code']) > 0.4 * max(1, len(section_body)))
+        if any(kw in h2_lower for kw in SEC_CODE) or cb_dominant:
+            if cb and cb['code'].strip():
+                if _make_code_slide(
+                    prs, h2_title, cb['code'], cb['language'],
+                    description=cb['before'],
+                ) is not None:
+                    _record_toc()
+                    continue
+            # Sinon : pas de bloc de code malgré le mot-clé → fallback
 
         # ── Cas pratique / étude de cas (4 cartes Z-flow) ─────────────
         # Déclenchement : mot-clé titre. Structure du corps détectée par
