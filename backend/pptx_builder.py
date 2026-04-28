@@ -615,6 +615,31 @@ def _tb(slide, left, top, width, height):
     )
 
 
+def _enable_shrink_to_fit(tf):
+    """
+    Active la réduction automatique de la police et de l'interligne quand
+    le texte déborde du cadre (équivalent au « Réduire le texte en cas de
+    dépassement » de PowerPoint, cf. <a:normAutofit/>).
+
+    PowerPoint calcule lui-même fontScale et lnSpcReduction au rendu :
+    si tout tient → aucun changement ; sinon les polices sont réduites
+    proportionnellement (la hiérarchie typographique est préservée).
+
+    Précondition : le text frame doit avoir une hauteur fixe (ce que fait
+    toujours `_tb`). Sans hauteur bornée, la réduction n'a pas de cible.
+
+    Idempotent : retire d'abord les éventuels éléments noAutofit /
+    spAutoFit / normAutofit existants pour éviter les doublons.
+    """
+    bodyPr = tf._txBody.find(qn('a:bodyPr'))
+    if bodyPr is None:
+        return
+    for tag in ('a:noAutofit', 'a:spAutoFit', 'a:normAutofit'):
+        for el in bodyPr.findall(qn(tag)):
+            bodyPr.remove(el)
+    etree.SubElement(bodyPr, qn('a:normAutofit'))
+
+
 def _set_bg(slide, color: RGBColor):
     bg = slide.background
     bg.fill.solid()
@@ -1326,19 +1351,21 @@ def _make_content_slide(prs, title: str, content_lines: list[str],
                         is_bullets: bool = True, section_label: str = ''):
     slide = _content_base(prs, title, section_label)
 
-    # Titre
+    # Titre — autofit pour gérer les chapitres au libellé long
     top_title = 0.5 if section_label else 0.18
     tb_title = _tb(slide, 0.22, top_title, 12.9, 1.0)
-    tf = tb_title.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
+    tf_title = tb_title.text_frame
+    tf_title.word_wrap = True
+    p = tf_title.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf_title)
 
     # Séparateur
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
 
-    # Corps
+    # Corps — overflow protection : si la liste de bullets / le paragraphe
+    # déborde, PowerPoint réduira automatiquement la police au rendu.
     body_top = sep_top + 0.18
     body_h   = 7.5 - body_top - 0.35
     tb_body = _tb(slide, 0.22, body_top, 12.9, body_h)
@@ -1357,6 +1384,7 @@ def _make_content_slide(prs, title: str, content_lines: list[str],
         else:
             _add_runs(p, line, 13, C_TEXT_LIGHT)
 
+    _enable_shrink_to_fit(tf)
     return slide
 
 
@@ -1366,10 +1394,11 @@ def _make_two_column_slide(prs, title: str, bullets: list[str], section_label: s
     top_title = 0.5 if section_label else 0.18
     _icon_chip(slide, 0.22, top_title + 0.12, 0.5, CHIP_COMPARE, bg_color=C_ACCENT)
     tb_title = _tb(slide, 0.85, top_title, 12.27, 1.0)
-    tf = tb_title.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
+    tf_title = tb_title.text_frame
+    tf_title.word_wrap = True
+    p = tf_title.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf_title)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -1383,6 +1412,8 @@ def _make_two_column_slide(prs, title: str, bullets: list[str], section_label: s
     # Séparateur vertical central
     _rect(slide, 6.8, body_top, 0.02, body_h, C_ACCENT_MID)
 
+    # Chaque colonne : autofit indépendant — si une colonne déborde plus
+    # que l'autre (cas asymétrique), seule celle-ci est réduite.
     for col_lines, lx in [(col1, 0.22), (col2, 6.95)]:
         tb = _tb(slide, lx, body_top, 6.35, body_h)
         tf = tb.text_frame
@@ -1395,6 +1426,7 @@ def _make_two_column_slide(prs, title: str, bullets: list[str], section_label: s
             run_b.text = '◆  '
             _run_fmt(run_b, 9, C_BULLET, bold=True)
             _add_runs(p, line, 13, C_TEXT_LIGHT)
+        _enable_shrink_to_fit(tf)
 
     return slide
 
@@ -1448,6 +1480,7 @@ def _make_table_slide(prs, title: str, headers: list[str], rows: list[list[str]]
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -1513,6 +1546,9 @@ def _make_table_slide(prs, title: str, headers: list[str], rows: list[list[str]]
         p.space_after  = Pt(0)
         _add_runs(p, str(text), size, color, base_bold=bold,
                   font=(FONT_DISPLAY if is_header else FONT_BODY))
+        # Cellules de tableau : si le texte d'une cellule déborde de la
+        # hauteur de ligne, PowerPoint réduit la police au rendu.
+        _enable_shrink_to_fit(tf)
 
     # Header row : alignement selon colonne (numérique → droite, sinon gauche)
     for j, h in enumerate(headers[:n_cols]):
@@ -1580,6 +1616,7 @@ def _make_definitions_slide(prs, items: list[tuple[str, str]]):
         run_d.text = _clean(definition)
         _run_fmt(run_d, 12, C_TEXT_LIGHT)
 
+    _enable_shrink_to_fit(tf)
     return slide
 
 
@@ -1628,6 +1665,7 @@ def _make_key_points_slide(prs, points: list[str]):
             run_num.text = f"{CIRCLED_NUMS[idx]}  "
             _run_fmt(run_num, 15, C_ACCENT, bold=True, font=FONT_DISPLAY)
             _add_runs(p, point, 13, C_TEXT_LIGHT)
+        _enable_shrink_to_fit(tf)
 
     return slide
 
@@ -1694,6 +1732,9 @@ def _make_callout_slide(prs, quote: str, attribution: str = '',
     run_q = p_q.add_run()
     run_q.text = quote
     _run_fmt(run_q, quote_pt, C_WHITE, italic=True, font=FONT_DISPLAY)
+    # La citation a déjà une taille adaptative selon longueur ; autofit en
+    # complément pour les cas extrêmes (citations très longues + saut de ligne).
+    _enable_shrink_to_fit(tf_q)
 
     # ── Trait accent sous la citation ──
     _rect(slide, 6.16, 5.75, 1.0, 0.04, C_ACCENT)
@@ -1818,6 +1859,7 @@ def _make_objectives_slide(prs, items: list[str], section_label: str = ''):
             _add_runs(p, rest, txt_pt, C_TEXT_LIGHT)
         else:
             _add_runs(p, obj, txt_pt, C_TEXT_LIGHT)
+        _enable_shrink_to_fit(tf)
 
     return slide
 
@@ -1935,6 +1977,7 @@ def _make_synthese_slide(prs, items: list[str], section_label: str = ''):
         else:
             p_l = tf_t.paragraphs[0]
             _add_runs(p_l, rest, lead_pt, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+        _enable_shrink_to_fit(tf_t)
 
     return slide
 
@@ -1982,6 +2025,7 @@ def _make_case_study_slide(prs, title: str, contexte: str, probleme: str,
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2067,6 +2111,10 @@ def _make_case_study_slide(prs, title: str, contexte: str, probleme: str,
             run_e = p_e.add_run()
             run_e.text = '— à compléter —'
             _run_fmt(run_e, 11, C_TEXT_MUTED, italic=True, font=FONT_BODY)
+        # Carte de cas pratique : si le texte tronqué à 350 chars déborde
+        # quand même (rare mais possible avec beaucoup de retours ligne),
+        # PowerPoint réduit la police au rendu.
+        _enable_shrink_to_fit(tf_b)
 
     return slide
 
@@ -2111,6 +2159,7 @@ def _make_timeline_slide(prs, title: str, events: list, section_label: str = '')
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2220,6 +2269,9 @@ def _make_timeline_slide(prs, title: str, events: list, section_label: str = '')
             p_dsc.space_before = Pt(2)
             _add_runs(p_dsc, _truncate(ev['description'], desc_max),
                       desc_pt, C_TEXT_LIGHT)
+        # Cellule timeline étroite (col_w plafonnée) : si titre+description
+        # ne tiennent pas, PowerPoint réduit la police au rendu.
+        _enable_shrink_to_fit(tf_t)
 
     return slide
 
@@ -2337,6 +2389,7 @@ def _make_versus_slide(prs, title: str, left_label: str, left_items: list[str],
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2440,6 +2493,7 @@ def _make_versus_slide(prs, title: str, left_label: str, left_items: list[str],
                 _add_runs(p_i, rest, item_pt, C_TEXT_LIGHT)
             else:
                 _add_runs(p_i, it, item_pt, C_TEXT_LIGHT, base_bold=False)
+            _enable_shrink_to_fit(tfi)
 
     _render_column(left_x, left_label, left_items, left_color, left_bullet)
     _render_column(right_x, right_label, right_items, right_color, right_bullet)
@@ -2566,6 +2620,7 @@ def _make_progress_slide(prs, title: str, stats: list, section_label: str = ''):
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2670,6 +2725,7 @@ def _make_stat_chart_slide(prs, title: str, stats: list, section_label: str = ''
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2752,6 +2808,7 @@ def _make_stat_slide(prs, title: str, stats: list[dict], section_label: str = ''
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2800,6 +2857,7 @@ def _make_two_column_text_slide(prs, title: str, left_text: str, right_text: str
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2817,6 +2875,7 @@ def _make_two_column_text_slide(prs, title: str, left_text: str, right_text: str
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.space_before = Pt(4)
             _add_runs(p, line.strip(), 12, C_TEXT_LIGHT)
+        _enable_shrink_to_fit(tf)
 
     return slide
 
@@ -2857,6 +2916,7 @@ def _make_stepper_slide(prs, title: str, steps: list, section_label: str = ''):
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2925,6 +2985,7 @@ def _make_stepper_slide(prs, title: str, steps: list, section_label: str = ''):
         elif desc_step:
             p_d = tf_step.paragraphs[0]
             _add_runs(p_d, desc_step, desc_pt, C_TEXT_LIGHT)
+        _enable_shrink_to_fit(tf_step)
 
     return slide
 
@@ -2941,6 +3002,7 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 24, C_WHITE, base_bold=True, font=FONT_DISPLAY)
+    _enable_shrink_to_fit(tf)
 
     sep_top = top_title + 1.0
     _rect(slide, 0.22, sep_top, 12.9, 0.025, C_ACCENT)
@@ -2952,6 +3014,7 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
         tf_d.word_wrap = True
         pd = tf_d.paragraphs[0]
         _add_runs(pd, _truncate(description, 200), 12, C_TEXT_MUTED)
+        _enable_shrink_to_fit(tf_d)
         body_top += 0.9
 
     n = min(len(elements), 7)
@@ -2975,6 +3038,7 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
         pe = tf.paragraphs[0]
         pe.alignment = PP_ALIGN.CENTER
         _add_runs(pe, _truncate(el, 35), 11, C_TEXT_LIGHT)
+        _enable_shrink_to_fit(tf)
 
         if i < n - 1:
             tb_arr = _tb(slide, lx + elem_w + 0.02, elem_top + 0.28, arrow_w - 0.04, 0.45)
