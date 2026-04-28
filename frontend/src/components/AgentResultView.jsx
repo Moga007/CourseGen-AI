@@ -117,7 +117,10 @@ export default function AgentResultView({ pipelineResult, formParams }) {
                             const url = URL.createObjectURL(blob)
                             const a = document.createElement('a')
                             a.href = url
-                            a.download = `quiz_${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}.gift`
+                            const _quizBase = formParams?.code_moodle
+                                ? `${formParams.code_moodle}_Ch${String(formParams.numero_chapitre || 1).padStart(2, '0')}_${(formParams.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}`
+                                : `quiz_${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}`
+                            a.download = `${_quizBase}.gift`
                             document.body.appendChild(a)
                             a.click()
                             document.body.removeChild(a)
