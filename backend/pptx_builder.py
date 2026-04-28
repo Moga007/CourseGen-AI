@@ -78,6 +78,17 @@ CHIP_CODE    = '⌨'   # bloc de code (clavier — universellement reconnu)
 # Marque affichée dans le pied de page (badge gauche). À adapter par école.
 BRAND_LABEL = 'IESIG'
 
+# ── Transitions entre slides ────────────────────────────────────────────────
+# Animation appliquée sur toutes les slides via <p:transition>.
+# Volontairement subtile : fade rapide (~250ms) pour ponctuer la lecture
+# sans distraire. Mettre TRANSITION_ENABLED=False pour un deck statique.
+#
+# Types disponibles : 'fade', 'push', 'cover', 'wipe', 'cut' (= rien).
+# Vitesses             : 'slow' (~1000ms), 'med' (~700ms), 'fast' (~250ms).
+TRANSITION_ENABLED = True
+TRANSITION_KIND    = 'fade'
+TRANSITION_SPEED   = 'fast'
+
 # Motif de fond subtil (appliqué à toutes les slides de contenu via _content_base).
 # Presets DrawingML les plus adaptés à un fond sombre :
 #   'smGrid'    : grille fine (aspect technique/académique)
@@ -1001,6 +1012,40 @@ def _apply_footers(prs, specialite: str, module: str, chapitre: str,
         if i in skip_indices:
             continue
         _add_footer(slide, BRAND_LABEL, breadcrumb, i + 1, total)
+
+
+def _add_slide_transition(slide, kind: str = 'fade', speed: str = 'fast'):
+    """
+    Injecte une transition à l'entrée de la slide via <p:transition>.
+
+    `kind`  : 'fade' | 'push' | 'cover' | 'wipe' | 'cut' (== aucune anim)
+    `speed` : 'slow' (~1000ms) | 'med' (~700ms) | 'fast' (~250ms)
+
+    Idempotent : retire d'abord les éventuelles <p:transition> existantes.
+    Si kind == 'cut', supprime la transition (= valeur par défaut PPT).
+    """
+    sld = slide._element  # <p:sld>
+
+    # Retire les transitions existantes pour éviter les doublons
+    for existing in sld.findall(qn('p:transition')):
+        sld.remove(existing)
+
+    if kind == 'cut':
+        return  # rien à ajouter — comportement PowerPoint par défaut
+
+    # <p:transition spd="fast"><p:fade/></p:transition>
+    trans = etree.SubElement(sld, qn('p:transition'))
+    trans.set('spd', speed)
+    etree.SubElement(trans, qn(f'p:{kind}'))
+
+
+def _apply_transitions(prs, kind: str = TRANSITION_KIND,
+                       speed: str = TRANSITION_SPEED):
+    """Applique une transition uniforme à toutes les slides du deck."""
+    if not TRANSITION_ENABLED:
+        return
+    for slide in prs.slides:
+        _add_slide_transition(slide, kind=kind, speed=speed)
 
 
 def _icon_chip(slide, left: float, top: float, size: float, glyph: str,
@@ -3561,6 +3606,7 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
 
     _apply_footers(prs, specialite, module, chapitre,
                    skip_indices=section_slide_indices)
+    _apply_transitions(prs)
 
     buf = BytesIO()
     prs.save(buf)
@@ -3889,6 +3935,7 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
 
     _apply_footers(prs, specialite, module, chapitre,
                    skip_indices=section_slide_indices)
+    _apply_transitions(prs)
 
     buf = BytesIO()
     prs.save(buf)
