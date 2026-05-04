@@ -13,9 +13,6 @@ const NIVEAUX_LABELS = {
 }
 const NIVEAUX_GROUPE = { B1: 'Bachelor', B2: 'Bachelor', B3: 'Bachelor', M1: 'Master', M2: 'Master' }
 
-// Chaque cours comporte 12 chapitres (structure pédagogique IESIG)
-const NB_CHAPITRES_PAR_COURS = 12
-
 export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode, onToggleMode }) {
     const [specialites, setSpecialites]     = useState([])
     const [specialitesError, setSpecialitesError] = useState(false)
@@ -26,7 +23,6 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
         code_moodle:     '',
         semestre:        '',
         heures:          null,
-        numero_chapitre: 1,
         chapitre:        '',
         moteur:          'mistral',
     })
@@ -96,11 +92,6 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
             return
         }
 
-        if (name === 'numero_chapitre') {
-            setFormData({ ...formData, numero_chapitre: parseInt(value, 10) || 1 })
-            return
-        }
-
         setFormData({ ...formData, [name]: value })
     }
 
@@ -114,7 +105,6 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
         if (initialData) {
             // Rétro-compatibilité : si l'entrée n'a pas les nouveaux champs, on les initialise
             setFormData({
-                numero_chapitre: 1,
                 code_moodle:     '',
                 semestre:        '',
                 heures:          null,
@@ -127,8 +117,6 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
         formData.specialite &&
         formData.niveau &&
         formData.module &&
-        formData.numero_chapitre >= 1 &&
-        formData.numero_chapitre <= NB_CHAPITRES_PAR_COURS &&
         formData.chapitre
 
     return (
@@ -278,23 +266,6 @@ export default function CourseForm({ onSubmit, isLoading, initialData, isV2Mode,
                             {formData.code_moodle} · {formData.semestre} · {formData.heures}h
                         </p>
                     )}
-                </div>
-
-                {/* N° chapitre */}
-                <div>
-                    <label htmlFor="numero_chapitre" className="form-label">N° du chapitre</label>
-                    <select
-                        id="numero_chapitre"
-                        name="numero_chapitre"
-                        className="form-select"
-                        value={formData.numero_chapitre}
-                        onChange={handleChange}
-                        required
-                    >
-                        {Array.from({ length: NB_CHAPITRES_PAR_COURS }, (_, i) => i + 1).map(n => (
-                            <option key={n} value={n}>Chapitre {n} / {NB_CHAPITRES_PAR_COURS}</option>
-                        ))}
-                    </select>
                 </div>
 
                 {/* Titre du chapitre */}

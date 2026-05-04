@@ -35,6 +35,8 @@ C_TABLE_ROW2   = RGBColor(0x18, 0x18, 0x34)
 C_SUCCESS      = RGBColor(0x34, 0xD3, 0x99)   # vert (pour / avantages / après)
 C_WARN         = RGBColor(0xF5, 0x9E, 0x42)   # orange (contre / inconvénients / avant)
 C_BULLET       = RGBColor(0x6E, 0x75, 0xF9)   # Couleur des marqueurs bullets
+C_TEXT_ACCENT  = RGBColor(0xC7, 0xD2, 0xFE)   # Tint très clair de l'accent (petits labels sur fond sombre)
+C_WATERMARK    = RGBColor(0x7C, 0x7F, 0xF5)   # Tint moyen-clair de l'accent (grands chiffres romains, watermarks)
 
 # ═══════════════════════════════════════════════════════
 #  TYPOGRAPHIE
@@ -100,6 +102,126 @@ BG_PATTERN_ENABLED = True
 BG_PATTERN_PRESET  = 'dotGrid'
 BG_PATTERN_COLOR   = RGBColor(0x81, 0x8C, 0xF8)  # C_ACCENT2 (clair → plus visible sur fond sombre)
 BG_PATTERN_ALPHA   = 5    # %
+
+
+# ═══════════════════════════════════════════════════════
+#  THÈMES PAR SPÉCIALITÉ
+# ═══════════════════════════════════════════════════════
+# Chaque thème ne touche QUE la famille « accent » (panel, accent, variantes
+# claires/foncées, table header, bullet, watermarks). Le fond sombre, les
+# couleurs sémantiques (succès vert / warn orange) et la typo restent
+# identiques pour conserver une cohérence visuelle entre toutes les spécialités.
+#
+# Pour ajouter une spécialité : copier l'entrée 'GPE' et adapter les hex.
+
+SPECIALITE_THEMES = {
+    # DIA → palette violette par défaut (pas d'override).
+    'RH': {  # Base utilisateur : #174d94 (bleu profond)
+        'panel':       RGBColor(0x1F, 0x5F, 0xB0),
+        'accent':      RGBColor(0x17, 0x4D, 0x94),
+        'accent2':     RGBColor(0x4A, 0x82, 0xC8),
+        'accent_dark': RGBColor(0x0A, 0x1F, 0x3A),
+        'accent_mid':  RGBColor(0x10, 0x2E, 0x5C),
+        'table_hdr':   RGBColor(0x10, 0x3A, 0x73),
+        'bullet':      RGBColor(0x4A, 0x82, 0xC8),
+        'text_accent': RGBColor(0xC5, 0xD8, 0xF0),
+        'watermark':   RGBColor(0x5E, 0x8F, 0xD0),
+    },
+    'GFC': {  # Base utilisateur : #03989e (turquoise)
+        'panel':       RGBColor(0x04, 0xAB, 0xB2),
+        'accent':      RGBColor(0x03, 0x98, 0x9E),
+        'accent2':     RGBColor(0x2D, 0xC8, 0xCF),
+        'accent_dark': RGBColor(0x01, 0x3A, 0x3D),
+        'accent_mid':  RGBColor(0x02, 0x64, 0x67),
+        'table_hdr':   RGBColor(0x02, 0x7A, 0x80),
+        'bullet':      RGBColor(0x2D, 0xC8, 0xCF),
+        'text_accent': RGBColor(0xB8, 0xE5, 0xE8),
+        'watermark':   RGBColor(0x45, 0xCE, 0xD5),
+    },
+    'IWA': {  # Base utilisateur : #a81717 (rouge profond)
+        'panel':       RGBColor(0xC1, 0x19, 0x19),
+        'accent':      RGBColor(0xA8, 0x17, 0x17),
+        'accent2':     RGBColor(0xD6, 0x45, 0x45),
+        'accent_dark': RGBColor(0x3D, 0x08, 0x08),
+        'accent_mid':  RGBColor(0x6E, 0x0F, 0x0F),
+        'table_hdr':   RGBColor(0x8C, 0x13, 0x13),
+        'bullet':      RGBColor(0xD6, 0x45, 0x45),
+        'text_accent': RGBColor(0xF0, 0xC5, 0xC5),
+        'watermark':   RGBColor(0xD9, 0x65, 0x65),
+    },
+    'GPE': {  # Base utilisateur : #ea8c43 (orange)
+        'panel':       RGBColor(0xED, 0x96, 0x56),
+        'accent':      RGBColor(0xEA, 0x8C, 0x43),
+        'accent2':     RGBColor(0xF4, 0xAF, 0x72),
+        'accent_dark': RGBColor(0x5E, 0x34, 0x16),
+        'accent_mid':  RGBColor(0x92, 0x50, 0x1F),
+        'table_hdr':   RGBColor(0xC9, 0x74, 0x32),
+        'bullet':      RGBColor(0xF4, 0xAF, 0x72),
+        'text_accent': RGBColor(0xF7, 0xD4, 0xB3),
+        'watermark':   RGBColor(0xF0, 0xA4, 0x68),
+    },
+    'MCD': {  # Base utilisateur : #edb425 (jaune doré)
+        'panel':       RGBColor(0xF0, 0xBC, 0x3A),
+        'accent':      RGBColor(0xED, 0xB4, 0x25),
+        'accent2':     RGBColor(0xF5, 0xCD, 0x5C),
+        'accent_dark': RGBColor(0x5E, 0x47, 0x0B),
+        'accent_mid':  RGBColor(0x93, 0x70, 0x1A),
+        'table_hdr':   RGBColor(0xC8, 0x97, 0x20),
+        'bullet':      RGBColor(0xF5, 0xCD, 0x5C),
+        'text_accent': RGBColor(0xF8, 0xE0, 0xA3),
+        'watermark':   RGBColor(0xF3, 0xC6, 0x4A),
+    },
+}
+
+# Sauvegarde de la palette violette par défaut (DIA / fallback) pour pouvoir la
+# restaurer entre deux générations consécutives avec des spécialités différentes.
+_DEFAULT_THEME = {
+    'panel':       C_PANEL,
+    'accent':      C_ACCENT,
+    'accent2':     C_ACCENT2,
+    'accent_dark': C_ACCENT_DARK,
+    'accent_mid':  C_ACCENT_MID,
+    'table_hdr':   C_TABLE_HDR,
+    'bullet':      C_BULLET,
+    'text_accent': C_TEXT_ACCENT,
+    'watermark':   C_WATERMARK,
+}
+
+
+def _extract_specialite_code(specialite: str) -> str:
+    """
+    Extrait le code court ('GPE', 'RH'...) depuis une chaîne qui peut être
+    soit le code seul ('GPE'), soit le label complet ('GPE — Gestion, Projet...').
+    """
+    if not specialite:
+        return ''
+    code = str(specialite).strip().split()[0].split('—')[0].strip()
+    return code.upper()
+
+
+def _apply_theme(specialite: str) -> None:
+    """
+    Applique la palette d'accent correspondant à la spécialité en réassignant
+    les globals C_PANEL / C_ACCENT / ... du module. Les fonctions de rendu
+    résolvent ces noms à l'appel : un override ici suffit pour toute la
+    génération qui suit. Spécialité inconnue ou vide → palette par défaut.
+    """
+    global C_PANEL, C_ACCENT, C_ACCENT2, C_ACCENT_DARK, C_ACCENT_MID
+    global C_TABLE_HDR, C_BULLET, C_TEXT_ACCENT, C_WATERMARK, BG_PATTERN_COLOR
+
+    code = _extract_specialite_code(specialite)
+    theme = SPECIALITE_THEMES.get(code, _DEFAULT_THEME)
+
+    C_PANEL          = theme['panel']
+    C_ACCENT         = theme['accent']
+    C_ACCENT2        = theme['accent2']
+    C_ACCENT_DARK    = theme['accent_dark']
+    C_ACCENT_MID     = theme['accent_mid']
+    C_TABLE_HDR      = theme['table_hdr']
+    C_BULLET         = theme['bullet']
+    C_TEXT_ACCENT    = theme['text_accent']
+    C_WATERMARK      = theme['watermark']
+    BG_PATTERN_COLOR = theme['accent2']
 
 
 # ═══════════════════════════════════════════════════════
@@ -1146,7 +1268,7 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
     p3 = tf_mod.paragraphs[0]
     run3 = p3.add_run()
     run3.text = module
-    _run_fmt(run3, 12, RGBColor(0xC7, 0xD2, 0xFE), italic=True)
+    _run_fmt(run3, 12, C_TEXT_ACCENT, italic=True)
 
     # ── Panneau droit : image ou déco ─────────────────
     RIGHT_L = 4.4
@@ -1231,14 +1353,14 @@ def _make_section_slide(prs, title: str, numero: int = 0):
         p.alignment = PP_ALIGN.RIGHT
         run = p.add_run()
         run.text = CHIFFRES_ROMAINS[numero - 1]
-        _run_fmt(run, 200, RGBColor(0x7C, 0x7F, 0xF5), bold=True, font=FONT_DISPLAY)
+        _run_fmt(run, 200, C_WATERMARK, bold=True, font=FONT_DISPLAY)
 
     # Petite étiquette "SECTION X" en haut
     tb_lbl = _tb(slide, 0.6, 0.3, 5, 0.45)
     p_lbl = tb_lbl.text_frame.paragraphs[0]
     run_lbl = p_lbl.add_run()
     run_lbl.text = f"SECTION {CHIFFRES_ROMAINS[numero - 1]}" if 0 < numero <= len(CHIFFRES_ROMAINS) else "SECTION"
-    _run_fmt(run_lbl, 11, RGBColor(0xC7, 0xD2, 0xFE), bold=True, font=FONT_DISPLAY)
+    _run_fmt(run_lbl, 11, C_TEXT_ACCENT, bold=True, font=FONT_DISPLAY)
 
     # Titre de section
     tb = _tb(slide, 0.6, 1.5, 10.0, 4.5)
@@ -3325,6 +3447,8 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
     Chaque slide est rendue selon son layout : bullets, two-column, stat-callout, schema.
     Utilise les mêmes styles visuels que markdown_to_pptx.
     """
+    _apply_theme(specialite)
+
     prs = Presentation()
     prs.slide_width  = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -3620,6 +3744,8 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
 def markdown_to_pptx(contenu: str, specialite: str, module: str,
                      chapitre: str, niveau: str = '',
                      title_image: bytes = None, photographer: str = '') -> bytes:
+    _apply_theme(specialite)
+
     prs = Presentation()
     prs.slide_width  = SLIDE_W
     prs.slide_height = SLIDE_H
