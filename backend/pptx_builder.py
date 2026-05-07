@@ -1223,7 +1223,8 @@ def _section_badge(slide, label: str, left: float, top: float):
 # ═══════════════════════════════════════════════════════
 
 def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: str,
-                      title_image: bytes = None, photographer: str = ''):
+                      title_image: bytes = None, photographer: str = '',
+                      title_source: str = 'Unsplash'):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_bg(slide, C_BG)
 
@@ -1316,13 +1317,21 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
         # Trait déco sous le titre
         _rect(slide, 4.75, 6.1, 2.0, 0.05, C_ACCENT)
 
-    # Attribution photographe Unsplash (obligatoire)
-    if title_image and photographer:
+    # Attribution image (obligatoire pour Unsplash/Pexels, optionnelle mais
+    # utile pour Stability AI). Stability ne nécessite pas de photographe.
+    if title_image:
+        src_label = title_source or "Unsplash"
+        if src_label.lower().startswith("stability"):
+            attribution_text = "Image générée par IA (Stability AI)"
+        elif photographer:
+            attribution_text = f"Photo: {photographer} / {src_label}"
+        else:
+            attribution_text = f"Image / {src_label}"
         tb_photo = _tb(slide, RIGHT_L + 0.15, 7.2, RIGHT_W - 0.3, 0.28)
         p_ph = tb_photo.text_frame.paragraphs[0]
         p_ph.alignment = PP_ALIGN.RIGHT
         run_ph = p_ph.add_run()
-        run_ph.text = f"Photo: {photographer} / Unsplash"
+        run_ph.text = attribution_text
         _run_fmt(run_ph, 7, C_TEXT_MUTED)
 
     return slide
@@ -1332,11 +1341,45 @@ def _make_title_slide(prs, specialite: str, module: str, chapitre: str, niveau: 
 #  SLIDE DE SECTION – Fond bicolore
 # ═══════════════════════════════════════════════════════
 
-def _make_section_slide(prs, title: str, numero: int = 0):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _set_bg(slide, C_ACCENT)
+def _make_section_slide(prs, title: str, numero: int = 0,
+                         image: bytes = None, photographer: str = '',
+                         source: str = ''):
+    """
+    Slide de couverture de section.
 
-    # Bande sombre en haut
+    - Sans image : fond bicolore + grand chiffre romain en watermark.
+    - Avec image (Unsplash/Pexels) : image plein cadre + voile sombre dégradé
+      pour préserver la lisibilité du titre. Bandes haute/basse conservées
+      pour cohérence visuelle avec les sections sans image.
+    """
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    if image:
+        # ── Variante illustrée ──────────────────────────────────────────
+        # Fond accent comme filet de sécurité (visible si l'image ne couvre
+        # pas exactement le cadre, ce qui ne devrait pas arriver mais évite
+        # un fond blanc en cas de souci de ratio).
+        _set_bg(slide, C_ACCENT_DARK)
+
+        # Image plein cadre. python-pptx ne fait pas de crop "cover" :
+        # add_picture remplit la zone, et l'image est étirée pour la couvrir
+        # proportionnellement. Pour des photos landscape Unsplash/Pexels en
+        # 16:9 le rendu est correct.
+        try:
+            slide.shapes.add_picture(
+                BytesIO(image),
+                Inches(0), Inches(0), Inches(13.33), Inches(7.5),
+            )
+        except Exception:
+            # Si l'image est corrompue / illisible, on retombe sur le rendu
+            # sans image plutôt que de planter le build.
+            image = None
+
+    if not image:
+        # ── Variante d'origine, sans image ─────────────────────────────
+        _set_bg(slide, C_ACCENT)
+
+    # Bande sombre en haut (sur image : opaque pour ancrer le label SECTION)
     _rect(slide, 0, 0, 13.33, 1.1, C_ACCENT_DARK)
     # Bande sombre en bas
     _rect(slide, 0, 6.3, 13.33, 1.2, C_ACCENT_DARK)
@@ -1345,8 +1388,18 @@ def _make_section_slide(prs, title: str, numero: int = 0):
     # Ligne de séparation basse
     _rect(slide, 0, 6.28, 13.33, 0.04, C_ACCENT2)
 
-    # Grand chiffre romain en fond (watermark)
-    if 0 < numero <= len(CHIFFRES_ROMAINS):
+    if image:
+        # Voile semi-transparent côté gauche pour garantir la lisibilité du
+        # titre même si l'image est claire. On laisse environ 40 % de l'image
+        # visible à droite (elle reste reconnaissable et apporte le contexte
+        # visuel demandé).
+        _add_transparent_rect(slide, 0, 1.1, 8.5, 5.2, C_ACCENT_DARK, 70)
+        # Léger gradient de continuité entre la zone voilée et l'image nette
+        _add_transparent_rect(slide, 8.5, 1.1, 1.0, 5.2, C_ACCENT_DARK, 35)
+
+    # Grand chiffre romain en fond (watermark) — masqué quand on a une image
+    # pour ne pas surcharger visuellement la composition photo + voile.
+    if not image and 0 < numero <= len(CHIFFRES_ROMAINS):
         tb_num = _tb(slide, 7.5, 0.5, 5.5, 6.0)
         tf = tb_num.text_frame
         p = tf.paragraphs[0]
@@ -1362,13 +1415,34 @@ def _make_section_slide(prs, title: str, numero: int = 0):
     run_lbl.text = f"SECTION {CHIFFRES_ROMAINS[numero - 1]}" if 0 < numero <= len(CHIFFRES_ROMAINS) else "SECTION"
     _run_fmt(run_lbl, 11, C_TEXT_ACCENT, bold=True, font=FONT_DISPLAY)
 
-    # Titre de section
-    tb = _tb(slide, 0.6, 1.5, 10.0, 4.5)
+    # Titre de section — réduit la largeur quand image présente pour rester
+    # dans la zone voilée et préserver la lisibilité.
+    title_width = 7.7 if image else 10.0
+    tb = _tb(slide, 0.6, 1.5, title_width, 4.5)
     tf = tb.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
     _add_runs(p, title, 40, C_WHITE, base_bold=True, font=FONT_DISPLAY)
     p.alignment = PP_ALIGN.LEFT
+
+    # Attribution image — formats différents selon le fournisseur :
+    #  - Unsplash/Pexels : "Photo: {nom} / {source}" (attribution photographe obligatoire)
+    #  - Stability AI    : "Image générée par IA (Stability AI)"
+    if image:
+        src_label = source or "Unsplash"
+        if src_label.lower().startswith("stability"):
+            attribution_text = "Image générée par IA (Stability AI)"
+        elif photographer:
+            attribution_text = f"Photo: {photographer} / {src_label}"
+        else:
+            attribution_text = ""  # pas d'attribution si pas d'info
+        if attribution_text:
+            tb_photo = _tb(slide, 0.6, 6.85, 12.1, 0.35)
+            p_ph = tb_photo.text_frame.paragraphs[0]
+            p_ph.alignment = PP_ALIGN.RIGHT
+            run_ph = p_ph.add_run()
+            run_ph.text = attribution_text
+            _run_fmt(run_ph, 8, C_TEXT_MUTED)
 
     return slide
 
@@ -3441,12 +3515,18 @@ def _make_schema_slide(prs, title: str, description: str, elements: list[str],
 
 def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
                          chapitre: str, niveau: str = '',
-                         title_image: bytes = None, photographer: str = '') -> bytes:
+                         title_image: bytes = None, photographer: str = '',
+                         title_source: str = 'Unsplash',
+                         section_images: dict | None = None) -> bytes:
     """
     Génère une présentation PPTX depuis le slides_json de l'Agent Designer.
     Chaque slide est rendue selon son layout : bullets, two-column, stat-callout, schema.
     Utilise les mêmes styles visuels que markdown_to_pptx.
+
+    `section_images` : dict {titre_section: {'bytes', 'photographer', 'source'}}.
+    `title_source`   : libellé du fournisseur de l'image titre (attribution).
     """
+    section_images = section_images or {}
     _apply_theme(specialite)
 
     prs = Presentation()
@@ -3473,7 +3553,8 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
         # ── Slide titre ──────────────────────────────────────────────────────
         if slide_type == 'title' or not title_done:
             _make_title_slide(prs, specialite, module, chapitre, niveau,
-                              title_image=title_image, photographer=photographer)
+                              title_image=title_image, photographer=photographer,
+                              title_source=title_source)
             title_done = True
             # Crée le placeholder du sommaire juste après le titre
             if toc_slide is None:
@@ -3484,7 +3565,13 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
         # ── Slide section ────────────────────────────────────────────────────
         if slide_type == 'section':
             section_counter_v2 += 1
-            _make_section_slide(prs, titre, numero=section_counter_v2)
+            sec_img_meta = section_images.get(titre) or {}
+            _make_section_slide(
+                prs, titre, numero=section_counter_v2,
+                image=sec_img_meta.get('bytes'),
+                photographer=sec_img_meta.get('photographer', ''),
+                source=sec_img_meta.get('source', ''),
+            )
             section_slide_indices.add(len(prs.slides) - 1)
             toc_entries.append((titre, prs.slides[-1]))
             continue
@@ -3743,7 +3830,19 @@ def slides_json_to_pptx(slides_json: dict, specialite: str, module: str,
 
 def markdown_to_pptx(contenu: str, specialite: str, module: str,
                      chapitre: str, niveau: str = '',
-                     title_image: bytes = None, photographer: str = '') -> bytes:
+                     title_image: bytes = None, photographer: str = '',
+                     title_source: str = 'Unsplash',
+                     section_images: dict | None = None) -> bytes:
+    """
+    `section_images` : dict {titre_section_H2: {'bytes': bytes, 'photographer':
+    str, 'source': str}} fourni par `_fetch_section_images` côté API. Les
+    sections sans entrée retombent sur le rendu sans image (comportement
+    historique).
+
+    `title_source` : libellé du fournisseur de l'image titre ('Unsplash',
+    'Pexels', 'Stability AI'). Utilisé pour l'attribution.
+    """
+    section_images = section_images or {}
     _apply_theme(specialite)
 
     prs = Presentation()
@@ -3751,7 +3850,8 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
     prs.slide_height = SLIDE_H
 
     _make_title_slide(prs, specialite, module, chapitre, niveau,
-                      title_image=title_image, photographer=photographer)
+                      title_image=title_image, photographer=photographer,
+                      title_source=title_source)
 
     # Sommaire cliquable : créé comme placeholder juste après la titre, rempli
     # à la fin une fois que toutes les slides de section ont été créées.
@@ -3985,7 +4085,13 @@ def markdown_to_pptx(contenu: str, specialite: str, module: str,
             # Sinon, on retombe sur le dispatch classique ci-dessous
 
         section_counter += 1
-        _make_section_slide(prs, h2_title, numero=section_counter)
+        sec_img_meta = section_images.get(h2_title) or {}
+        _make_section_slide(
+            prs, h2_title, numero=section_counter,
+            image=sec_img_meta.get('bytes'),
+            photographer=sec_img_meta.get('photographer', ''),
+            source=sec_img_meta.get('source', ''),
+        )
         section_slide_indices.add(len(prs.slides) - 1)
 
         subsections    = [s.strip() for s in re.split(r'\n(?=### )', section_body) if s.strip()]

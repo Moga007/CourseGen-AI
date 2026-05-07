@@ -10,6 +10,9 @@ backend/*.json.migrated
 # Cours générés en local (artefacts par utilisateur)
 backend/Cours-md/
 
+# Cache d'images générées par IA (Stability)
+backend/cache/
+
 # Claude Code
 .claude/
 
