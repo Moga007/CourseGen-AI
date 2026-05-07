@@ -12,18 +12,27 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
     const [quizLoading, setQuizLoading] = useState(false)
     const [quizError, setQuizError] = useState(null)
     const [quizMoteur, setQuizMoteur] = useState('mistral')
+    // Stratégie d'image pour la couverture du deck et les slides de section :
+    //   standard = Unsplash + Pexels (gratuit, latence faible)
+    //   qualite  = Stability IA pour les sujets abstraits, stock pour le concret (~0,06–0,15 $/cours)
+    //   premium  = Stability IA partout + slide titre (~0,30 $/cours, latence +1 min)
+    const [imageMode, setImageMode] = useState('standard')
 
     const handleGeneratePptx = async () => {
         setPptxLoading(true)
         setPptxError(null)
         try {
+            // Le mode 'premium' déclenche un fetch Stability AI par section
+            // (~5–15 s/image) → on étend le timeout à 3 min pour les decks à 8+ sections.
+            const timeout = imageMode === 'premium' ? 180000 : (imageMode === 'qualite' ? 90000 : 60000)
             const response = await axios.post(`${API_URL}/generate-pptx`, {
                 contenu,
                 specialite: formParams?.specialite || '',
                 module: formParams?.module || '',
                 chapitre: formParams?.chapitre || '',
                 niveau: formParams?.niveau || '',
-            }, { timeout: 60000, responseType: 'blob' })
+                image_mode: imageMode,
+            }, { timeout, responseType: 'blob' })
 
             const url = URL.createObjectURL(new Blob([response.data]))
             const a = document.createElement('a')
@@ -201,28 +210,50 @@ export default function CourseDisplay({ contenu, moteurUtilise, formParams }) {
                         </button>
                     </div>
 
-                    {/* Bouton Export PowerPoint */}
-                    <button
-                        onClick={handleGeneratePptx}
-                        disabled={pptxLoading}
-                        className="btn-secondary"
-                        title="Télécharger la présentation en PowerPoint (.pptx)"
-                    >
-                        {pptxLoading ? (
-                            <>
-                                <div className="loading-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
-                                Génération...
-                            </>
-                        ) : (
-                            <>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                                    <polyline points="13,2 13,9 20,9" />
-                                </svg>
-                                Export PowerPoint
-                            </>
-                        )}
-                    </button>
+                    {/* Bouton Export PowerPoint avec sélecteur de mode image */}
+                    <div className="flex items-center gap-1">
+                        <select
+                            value={imageMode}
+                            onChange={e => setImageMode(e.target.value)}
+                            disabled={pptxLoading}
+                            title="Stratégie d'image pour les slides de couverture / section. Standard = Unsplash + Pexels (gratuit). Qualité = IA Stability pour les sujets abstraits. Premium = IA Stability partout."
+                            style={{
+                                background: 'var(--bg-secondary)',
+                                border: '1px solid var(--border-subtle)',
+                                color: 'var(--text-secondary)',
+                                borderRadius: '8px 0 0 8px',
+                                padding: '6px 8px',
+                                fontSize: '12px',
+                                height: '100%',
+                            }}
+                        >
+                            <option value="standard">🆓 Images Standard</option>
+                            <option value="qualite">💎 Images Qualité</option>
+                            <option value="premium">🎨 Images Premium</option>
+                        </select>
+                        <button
+                            onClick={handleGeneratePptx}
+                            disabled={pptxLoading}
+                            className="btn-secondary"
+                            title="Télécharger la présentation en PowerPoint (.pptx)"
+                            style={{ borderRadius: '0 8px 8px 0' }}
+                        >
+                            {pptxLoading ? (
+                                <>
+                                    <div className="loading-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
+                                    Génération...
+                                </>
+                            ) : (
+                                <>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                                        <polyline points="13,2 13,9 20,9" />
+                                    </svg>
+                                    Export PowerPoint
+                                </>
+                            )}
+                        </button>
+                    </div>
 
                     {/* Bouton Copier HTML (pour LMS) */}
                     <button onClick={handleCopyHtml} className="btn-secondary copy-btn" title="Copiez le contenu formaté pour le coller dans votre LMS (Moodle, Canvas…)">

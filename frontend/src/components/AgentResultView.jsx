@@ -18,6 +18,8 @@ export default function AgentResultView({ pipelineResult, formParams }) {
     const [pptxError, setPptxError] = useState(null)
     const [quizLoading, setQuizLoading] = useState(false)
     const [quizError, setQuizError] = useState(null)
+    // Stratégie d'image PPTX : standard / qualite / premium (cf. CourseDisplay)
+    const [imageMode, setImageMode] = useState('standard')
 
     const score = pipelineResult.validation?.score_global
     const scoreColor = score >= 80 ? 'var(--success)' : score >= 60 ? '#f59e0b' : '#ef4444'
@@ -53,6 +55,7 @@ export default function AgentResultView({ pipelineResult, formParams }) {
                     module:      formParams?.module || '',
                     chapitre:    formParams?.chapitre || '',
                     niveau:      formParams?.niveau || '',
+                    image_mode:  imageMode,
                   }
                 : {
                     contenu:    pipelineResult.contenu_final_markdown,
@@ -60,10 +63,13 @@ export default function AgentResultView({ pipelineResult, formParams }) {
                     module:     formParams?.module || '',
                     chapitre:   formParams?.chapitre || '',
                     niveau:     formParams?.niveau || '',
+                    image_mode: imageMode,
                   }
 
+            // Stability prend ~5–15 s/image → timeout étendu en mode premium/qualité
+            const timeout = imageMode === 'premium' ? 180000 : (imageMode === 'qualite' ? 90000 : 60000)
             const response = await axios.post(`${API_URL}${endpoint}`, payload,
-                { timeout: 60000, responseType: 'blob' })
+                { timeout, responseType: 'blob' })
 
             const url = URL.createObjectURL(new Blob([response.data]))
             const a = document.createElement('a')
@@ -188,16 +194,41 @@ export default function AgentResultView({ pipelineResult, formParams }) {
 
             {/* Actions */}
             <div className="flex gap-2 flex-wrap mb-4">
-                <button onClick={handleGeneratePptx} disabled={pptxLoading} className="btn-secondary">
-                    {pptxLoading ? (
-                        <><div className="loading-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }} /> Génération...</>
-                    ) : (
-                        <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                            <polyline points="13,2 13,9 20,9" />
-                        </svg> Export PowerPoint</>
-                    )}
-                </button>
+                <div className="flex items-center gap-1">
+                    <select
+                        value={imageMode}
+                        onChange={e => setImageMode(e.target.value)}
+                        disabled={pptxLoading}
+                        title="Stratégie d'image. Standard = Unsplash + Pexels (gratuit). Qualité = IA Stability sur les sujets abstraits. Premium = IA Stability partout."
+                        style={{
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-subtle)',
+                            color: 'var(--text-secondary)',
+                            borderRadius: '8px 0 0 8px',
+                            padding: '6px 8px',
+                            fontSize: '12px',
+                        }}
+                    >
+                        <option value="standard">🆓 Images Standard</option>
+                        <option value="qualite">💎 Images Qualité</option>
+                        <option value="premium">🎨 Images Premium</option>
+                    </select>
+                    <button
+                        onClick={handleGeneratePptx}
+                        disabled={pptxLoading}
+                        className="btn-secondary"
+                        style={{ borderRadius: '0 8px 8px 0' }}
+                    >
+                        {pptxLoading ? (
+                            <><div className="loading-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }} /> Génération...</>
+                        ) : (
+                            <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                                <polyline points="13,2 13,9 20,9" />
+                            </svg> Export PowerPoint</>
+                        )}
+                    </button>
+                </div>
 
                 <button onClick={handleGenerateQuiz} disabled={quizLoading} className="btn-secondary">
                     {quizLoading ? (

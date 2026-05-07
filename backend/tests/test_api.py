@@ -191,7 +191,7 @@ class TestGeneratePptx:
         # Context managers évitent les conflits d'ordre d'arguments entre
         # @patch decorators et les fixtures pytest dans les classes de test.
         with patch("main._fetch_unsplash_image", new_callable=AsyncMock) as mock_unsplash:
-            mock_unsplash.return_value = (None, None)
+            mock_unsplash.return_value = (None, None, None)
             with patch("main.markdown_to_pptx", return_value=b"fake_pptx_bytes"):
                 response = client.post("/generate-pptx", json={
                     "contenu": "# Cours\n\nContenu du cours.",
@@ -209,7 +209,7 @@ class TestGeneratePptx:
 
     def test_pptx_generation_error(self, client):
         with patch("main._fetch_unsplash_image", new_callable=AsyncMock) as mock_unsplash:
-            mock_unsplash.return_value = (None, None)
+            mock_unsplash.return_value = (None, None, None)
             with patch("main.markdown_to_pptx", side_effect=Exception("Erreur PPTX")):
                 response = client.post("/generate-pptx", json={
                     "contenu": "# Cours",

@@ -84,6 +84,19 @@ def _check_api_keys() -> None:
     if configured == 0:
         print("[CONFIG] ❌  Aucun moteur IA configuré ! Ajoutez au moins une clé API dans .env")
 
+    # Clés image (optionnelles, pour les slides illustrées de couverture/section)
+    image_providers = [
+        ("UNSPLASH_ACCESS_KEY", "votre_cle_unsplash_ici"),
+        ("PEXELS_API_KEY",      "votre_cle_pexels_ici"),
+        ("STABILITY_API_KEY",   "votre_cle_stability_ici"),
+    ]
+    for env_var, placeholder in image_providers:
+        val = os.getenv(env_var, "")
+        if not val or val == placeholder or len(val) < 8:
+            print(f"[CONFIG] ℹ️  {env_var} non configurée — slides de section sans image pour ce fournisseur.")
+        else:
+            print(f"[CONFIG] ✅  {env_var} configurée (len={len(val)}).")
+
 
 def build_course_basename(
     specialite: str,
@@ -187,6 +200,22 @@ class MoteurIA(str, Enum):
     GEMINI  = "gemini"
 
 
+class ImageMode(str, Enum):
+    """
+    Stratégie d'image pour les slides de couverture (titre + sections).
+
+    - STANDARD : Unsplash + Pexels uniquement (gratuit, latence faible).
+    - QUALITE  : routage rule-based — sujets abstraits (concept, modèle,
+                 architecture, etc.) routés vers Stability AI, sujets concrets
+                 (cas pratique, étude de cas, chiffres) restent sur le stock.
+    - PREMIUM  : Stability AI sur toutes les sections + slide titre. Coût et
+                 latence maximaux mais homogénéité visuelle parfaite.
+    """
+    STANDARD = "standard"
+    QUALITE  = "qualite"
+    PREMIUM  = "premium"
+
+
 class GenerateRequest(BaseModel):
     specialite: str = Field(..., min_length=1, max_length=200)
     niveau:     str = Field(..., min_length=1, max_length=20)
@@ -226,6 +255,8 @@ class PptxRequest(BaseModel):
     # Métadonnées catalogue (optionnelles, pour nommage PPTX enrichi)
     code_moodle:     str | None = Field(default=None, max_length=50)
     numero_chapitre: int | None = Field(default=None, ge=1, le=12)
+    # Stratégie d'image pour la couverture du deck et les slides de section
+    image_mode: ImageMode = Field(default=ImageMode.STANDARD)
 
 
 class QuizRequest(BaseModel):
@@ -257,6 +288,8 @@ class PptxV2Request(BaseModel):
     # Métadonnées catalogue (optionnelles, pour nommage PPTX enrichi)
     code_moodle:     str | None = Field(default=None, max_length=50)
     numero_chapitre: int | None = Field(default=None, ge=1, le=12)
+    # Stratégie d'image pour la couverture du deck et les slides de section
+    image_mode: ImageMode = Field(default=ImageMode.STANDARD)
 
 
 class GenerateV2Request(BaseModel):
@@ -464,7 +497,27 @@ _UNSPLASH_GENERIC_FALLBACKS = [
 ]
 
 
-async def _fetch_unsplash_image(*queries: str) -> tuple:
+def _unsplash_configured() -> bool:
+    api_key = os.getenv("UNSPLASH_ACCESS_KEY", "")
+    return bool(api_key) and api_key != "votre_cle_unsplash_ici"
+
+
+def _pexels_configured() -> bool:
+    api_key = os.getenv("PEXELS_API_KEY", "")
+    return bool(api_key) and api_key != "votre_cle_pexels_ici"
+
+
+def _normalize_queries(queries: tuple, fallbacks: list[str]) -> list[str]:
+    """Déduplique en préservant l'ordre, vire les vides, ajoute les fallbacks."""
+    tried: list[str] = []
+    for q in list(queries) + fallbacks:
+        q = (q or "").strip()
+        if q and q not in tried:
+            tried.append(q)
+    return tried
+
+
+async def _fetch_unsplash_image(*queries: str, exclude_urls: set | None = None) -> tuple:
     """
     Récupère une image Unsplash en essayant plusieurs requêtes en cascade.
 
@@ -474,19 +527,17 @@ async def _fetch_unsplash_image(*queries: str) -> tuple:
     found'. On teste donc plusieurs formulations de la plus spécifique à la
     plus générique, en s'arrêtant à la première qui retourne une image.
 
-    Retourne (image_bytes, photographer_name) ou (None, None) si aucune
-    requête ne donne de résultat.
-    """
-    api_key = os.getenv("UNSPLASH_ACCESS_KEY", "")
-    if not api_key or api_key == "votre_cle_unsplash_ici":
-        return None, None
+    `exclude_urls` permet d'éviter de retomber sur la même photo (utile quand
+    on fetch plusieurs slides de section en parallèle dans un même cours).
 
-    # Déduplique en préservant l'ordre ; vire les vides et ajoute les fallbacks
-    tried: list[str] = []
-    for q in list(queries) + _UNSPLASH_GENERIC_FALLBACKS:
-        q = (q or "").strip()
-        if q and q not in tried:
-            tried.append(q)
+    Retourne (image_bytes, photographer_name, source_url) ou (None, None, None)
+    si aucune requête ne donne de résultat.
+    """
+    if not _unsplash_configured():
+        return None, None, None
+    exclude_urls = exclude_urls or set()
+    tried = _normalize_queries(queries, _UNSPLASH_GENERIC_FALLBACKS)
+    api_key = os.getenv("UNSPLASH_ACCESS_KEY", "")
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -500,26 +551,504 @@ async def _fetch_unsplash_image(*queries: str) -> tuple:
                     continue
                 data = resp.json()
                 img_url = data.get("urls", {}).get("regular")
-                if not img_url:
+                if not img_url or img_url in exclude_urls:
                     continue
                 img_resp = await client.get(img_url, timeout=15.0)
                 if img_resp.status_code != 200:
                     continue
-                return img_resp.content, data.get("user", {}).get("name", "")
+                return img_resp.content, data.get("user", {}).get("name", ""), img_url
     except Exception:
         pass
-    return None, None
+    return None, None, None
+
+
+_PEXELS_GENERIC_FALLBACKS = [
+    "business abstract",
+    "education modern",
+    "abstract gradient",
+]
+
+
+async def _fetch_pexels_image(*queries: str, exclude_urls: set | None = None) -> tuple:
+    """
+    Récupère une image Pexels via l'endpoint /v1/search en cascade de requêtes
+    (mêmes principes que `_fetch_unsplash_image` : du plus spécifique au plus
+    générique). Retourne (image_bytes, photographer_name, source_url) ou
+    (None, None, None).
+    """
+    if not _pexels_configured():
+        return None, None, None
+    exclude_urls = exclude_urls or set()
+    tried = _normalize_queries(queries, _PEXELS_GENERIC_FALLBACKS)
+    api_key = os.getenv("PEXELS_API_KEY", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for q in tried:
+                resp = await client.get(
+                    "https://api.pexels.com/v1/search",
+                    params={"query": q, "orientation": "landscape", "per_page": 5},
+                    headers={"Authorization": api_key},
+                )
+                if resp.status_code != 200:
+                    continue
+                photos = (resp.json() or {}).get("photos") or []
+                for photo in photos:
+                    img_url = (photo.get("src") or {}).get("large")
+                    if not img_url or img_url in exclude_urls:
+                        continue
+                    img_resp = await client.get(img_url, timeout=15.0)
+                    if img_resp.status_code != 200:
+                        continue
+                    return img_resp.content, photo.get("photographer", ""), img_url
+    except Exception:
+        pass
+    return None, None, None
+
+
+async def _fetch_hybrid_image(*queries: str, prefer: str = "unsplash",
+                               exclude_urls: set | None = None) -> tuple:
+    """
+    Stratégie hybride Unsplash + Pexels : essaie le fournisseur préféré, puis
+    l'autre en fallback si rien n'est trouvé. Retourne (bytes, photographer,
+    source_label, source_url) — `source_label` ∈ {'Unsplash', 'Pexels', ''}.
+    """
+    primary, secondary = ("unsplash", "pexels") if prefer == "unsplash" else ("pexels", "unsplash")
+    fetchers = {
+        "unsplash": (_fetch_unsplash_image, "Unsplash"),
+        "pexels":   (_fetch_pexels_image,   "Pexels"),
+    }
+    for key in (primary, secondary):
+        fn, label = fetchers[key]
+        img, photog, url = await fn(*queries, exclude_urls=exclude_urls)
+        if img:
+            return img, photog or "", label, url or ""
+    return None, "", "", ""
+
+
+# Slides à exclure de la détection des sections : ce sont des libellés
+# génériques qui n'ont pas vocation à devenir une slide de couverture
+# illustrée (et `markdown_to_pptx` les saute déjà via `SKIP`).
+_SECTION_TITLE_SKIP = {
+    'tableau comparatif', 'synthèse visuelle', 'pour aller plus loin',
+}
+
+
+def _extract_section_titles_from_markdown(contenu: str) -> list[str]:
+    """Liste ordonnée des titres H2 (## ...) qui produiront une slide de section
+    dans `markdown_to_pptx`. Filtre les libellés explicitement skippés."""
+    titles: list[str] = []
+    seen: set[str] = set()
+    for line in (contenu or "").splitlines():
+        if not line.startswith("## "):
+            continue
+        t = line.lstrip("#").strip()
+        if not t:
+            continue
+        tl = t.lower()
+        if any(kw in tl for kw in _SECTION_TITLE_SKIP):
+            continue
+        if t in seen:
+            continue
+        seen.add(t)
+        titles.append(t)
+    return titles
+
+
+def _extract_section_titles_from_slides_json(slides_json: dict) -> list[str]:
+    """Liste ordonnée des titres des slides `type: section` du pipeline V2."""
+    titles: list[str] = []
+    seen: set[str] = set()
+    for slide_data in (slides_json or {}).get("slides", []) or []:
+        if slide_data.get("type") != "section":
+            continue
+        t = (slide_data.get("titre") or "").strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        titles.append(t)
+    return titles
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Stability AI — génération d'images IA pour les slides de section / titre
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Fournisseur : Stability AI (`api.stability.ai`).
+# Modèle utilisé : Stable Image Core (le moins cher, ~3 crédits ≈ 0,03 $).
+# Endpoint : POST /v2beta/stable-image/generate/core (multipart/form-data).
+# Réponse : bytes JPEG si `Accept: image/*`.
+#
+# Coût indicatif (mai 2026) :
+#   - Stable Image Core   : 3 crédits/image  ≈ 0,03 $
+#   - SD 3.5 Large        : 6,5 crédits     ≈ 0,065 $
+#   - Stable Image Ultra  : 8 crédits        ≈ 0,08 $
+#
+# Stratégie de cache : on stocke les images générées sur disque dans
+# `backend/cache/section_images/{hash}.jpg`. La clé de hash combine prompt +
+# style + seed. Une regénération identique = aucun appel API.
+
+_STABILITY_CACHE_DIR = Path(__file__).parent / "cache" / "section_images"
+_STABILITY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_STABILITY_COST_PER_IMAGE = 0.03  # USD, Stable Image Core
+
+
+def _stability_configured() -> bool:
+    api_key = os.getenv("STABILITY_API_KEY", "")
+    return bool(api_key) and api_key != "votre_cle_stability_ici"
+
+
+# Style keywords par spécialité — homogénéise visuellement les decks d'une
+# même filière. Mots-clés volontairement génériques (couleur, technique,
+# composition) pour ne pas surcharger le prompt principal.
+_SPECIALITE_STYLE_KEYWORDS: dict[str, str] = {
+    "informatique":   "isometric tech illustration, blue and purple gradient, subtle circuit patterns, clean futuristic look",
+    "marketing":      "vibrant business illustration, modern infographic style, energetic warm colors",
+    "comptabilité":   "elegant minimalism, soft neutral palette, financial documents, professional tone",
+    "comptabilite":   "elegant minimalism, soft neutral palette, financial documents, professional tone",
+    "finance":        "elegant minimalism, soft neutral palette, financial documents, professional tone",
+    "management":     "professional corporate illustration, abstract teamwork, neutral palette with blue accents",
+    "communication":  "modern editorial illustration, vivid accent colors, dynamic composition",
+    "juridique":      "classical professional illustration, sober palette, columns and books motifs",
+    "droit":          "classical professional illustration, sober palette, columns and books motifs",
+    "design":         "creative editorial illustration, bold geometric shapes, vibrant pastel palette",
+}
+_DEFAULT_STYLE_KEYWORDS = "modern editorial illustration, clean professional style, soft lighting"
+
+
+def _style_keywords_for(specialite: str) -> str:
+    """Retourne le bloc de mots-clés style à concaténer au prompt Stability."""
+    if not specialite:
+        return _DEFAULT_STYLE_KEYWORDS
+    norm = specialite.strip().lower()
+    # Match exact, sinon match partiel (préfixe)
+    if norm in _SPECIALITE_STYLE_KEYWORDS:
+        return _SPECIALITE_STYLE_KEYWORDS[norm]
+    for key, val in _SPECIALITE_STYLE_KEYWORDS.items():
+        if key in norm or norm.startswith(key):
+            return val
+    return _DEFAULT_STYLE_KEYWORDS
+
+
+def _build_stability_prompt(titre_section: str, chapitre: str, specialite: str,
+                             niveau: str = "") -> str:
+    """
+    Construit le prompt Stability pour une slide de section. Toujours en
+    anglais (les modèles SD/SI sont nettement plus performants en EN).
+    """
+    parts = [
+        f"Educational illustration about \"{titre_section}\"",
+    ]
+    ctx = chapitre.strip()
+    if ctx:
+        parts.append(f"in the context of {ctx}")
+    spec = specialite.strip()
+    if spec:
+        lvl = niveau.strip()
+        parts.append(f"for a {spec} course" + (f" at {lvl} level" if lvl else ""))
+    style = _style_keywords_for(specialite)
+    parts.append(style)
+    parts.append(
+        "Abstract conceptual representation, no text, no logos, no watermarks, "
+        "no people faces visible, 16:9 cinematic composition, high quality, "
+        "professional educational material"
+    )
+    return ". ".join(parts) + "."
+
+
+def _stability_cache_key(prompt: str, seed: int) -> str:
+    """Hash stable du couple (prompt, seed) pour le cache disque."""
+    import hashlib
+    h = hashlib.sha256(f"{prompt}|seed={seed}".encode("utf-8")).hexdigest()
+    return h[:24]
+
+
+def _stability_seed_for(titre: str) -> int:
+    """Seed déterministe à partir du titre pour reproductibilité."""
+    import hashlib
+    h = hashlib.md5(titre.encode("utf-8")).hexdigest()
+    return int(h[:8], 16) % (2**31)
+
+
+# Compteur d'appels Stability par requête HTTP (réinitialisé via
+# `_reset_image_costs`, lu via `_log_image_costs`). Pas de protection
+# concurrente : FastAPI traite chaque requête dans un contexte différent et
+# `asyncio.gather` est cooperative — pas de course critique sur cette variable.
+_image_cost_state = {"stability_calls": 0, "stability_cache_hits": 0}
+
+
+def _reset_image_costs():
+    _image_cost_state["stability_calls"] = 0
+    _image_cost_state["stability_cache_hits"] = 0
+
+
+def _log_image_costs(context: str = ""):
+    calls = _image_cost_state["stability_calls"]
+    hits  = _image_cost_state["stability_cache_hits"]
+    cost  = calls * _STABILITY_COST_PER_IMAGE
+    print(f"[IMAGE] {context} | Stability: {calls} appel(s) (~{cost:.2f} $) | "
+          f"cache hits: {hits}")
+
+
+async def _fetch_stability_image(prompt: str, seed: int | None = None,
+                                  use_cache: bool = True) -> bytes | None:
+    """
+    Génère une image avec Stable Image Core. Retourne les bytes JPEG, ou None
+    si l'appel échoue (clé absente, quota épuisé, erreur réseau).
+
+    Le cache disque évite les appels redondants : un même (prompt, seed)
+    réutilise l'image stockée localement.
+    """
+    if not _stability_configured():
+        return None
+    if seed is None:
+        seed = 0  # 0 = seed aléatoire côté Stability
+
+    # Cache disque
+    if use_cache and seed != 0:
+        key = _stability_cache_key(prompt, seed)
+        cache_path = _STABILITY_CACHE_DIR / f"{key}.jpg"
+        if cache_path.exists():
+            try:
+                _image_cost_state["stability_cache_hits"] += 1
+                return cache_path.read_bytes()
+            except Exception:
+                pass  # cache illisible → on regénère
+
+    api_key = os.getenv("STABILITY_API_KEY", "")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # multipart/form-data avec 'none' file (workaround Stability API
+            # qui refuse application/x-www-form-urlencoded)
+            files = {"none": ""}
+            data = {
+                "prompt": prompt,
+                "aspect_ratio": "16:9",
+                "output_format": "jpeg",
+                "seed": str(seed),
+            }
+            resp = await client.post(
+                "https://api.stability.ai/v2beta/stable-image/generate/core",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "image/*",
+                },
+                files=files,
+                data=data,
+            )
+            if resp.status_code != 200:
+                # 402 = crédits épuisés, 401 = clé invalide, 429 = rate-limit
+                print(f"[STABILITY] HTTP {resp.status_code} : "
+                      f"{resp.text[:200] if resp.text else '(pas de message)'}")
+                return None
+            _image_cost_state["stability_calls"] += 1
+            img_bytes = resp.content
+            if use_cache and seed != 0:
+                try:
+                    (_STABILITY_CACHE_DIR / f"{key}.jpg").write_bytes(img_bytes)
+                except Exception:
+                    pass  # disque plein / droits → on continue sans cache
+            return img_bytes
+    except Exception as e:
+        print(f"[STABILITY] Exception : {e}")
+        return None
+
+
+# ─── Classifieur rule-based : sujet abstrait vs concret ──────────────────────
+#
+# Mots-clés du titre H2 indiquant un sujet **abstrait** (concept, modèle,
+# architecture, processus) → mieux servi par Stability qui génère exactement
+# ce qu'on demande au lieu d'une photo générique de réunion.
+_TOPIC_ABSTRACT_KW = {
+    'concept', 'principe', 'théorie', 'theorie', 'modèle', 'modele',
+    'modelisation', 'modélisation', 'architecture', 'méthode', 'methode',
+    'méthodologie', 'methodologie', 'algorithme', 'processus', 'cycle',
+    'framework', 'paradigme', 'approche', 'mécanisme', 'mecanisme',
+    # Acronymes techniques fréquents
+    'mcd', 'mld', 'mpd', 'merise', 'uml', 'bpmn', 'erp', 'crm',
+    'pipeline', 'devops', 'mvc', 'mvvm', 'rest', 'api', 'sgbd',
+    # Diagrammes / schémas
+    'diagramme', 'schéma', 'schema', 'flux', 'flowchart', 'topologie',
+    # Mathématiques / formules
+    'théorème', 'theoreme', 'formule', 'équation', 'equation', 'fonction',
+    'logique', 'probabilité', 'probabilite', 'statistique abstraite',
+}
+
+# Sujets **concrets** où une photo réelle convient mieux qu'une illustration IA
+# (le rendu Stability sur des humains/scènes du quotidien est souvent moyen).
+_TOPIC_CONCRETE_KW = {
+    'cas pratique', 'cas concret', 'étude de cas', 'etude de cas',
+    'mise en situation', 'exemple concret', 'business case',
+    'chiffres clés', 'chiffres cles', 'statistiques', 'kpi', 'indicateurs',
+    'le marché', 'le marche', 'entreprise', 'secteur',
+    'historique', 'évolution', 'evolution', 'chronologie', 'frise',
+    'introduction', 'présentation', 'presentation', 'contexte',
+    'définitions', 'definitions',
+}
+
+
+def _classify_section_topic(titre: str) -> str:
+    """Retourne 'abstract', 'concrete' ou 'unknown' selon les mots-clés du titre."""
+    t = (titre or "").lower()
+    if any(kw in t for kw in _TOPIC_ABSTRACT_KW):
+        return "abstract"
+    if any(kw in t for kw in _TOPIC_CONCRETE_KW):
+        return "concrete"
+    return "unknown"
+
+
+# ─── Fetcher unifié pour une slide (titre ou section) ────────────────────────
+
+async def _fetch_one_section_image(
+    title: str, idx: int, mode: ImageMode,
+    specialite: str, module: str, chapitre: str, niveau: str,
+    seen_urls: set, has_uns: bool, has_pex: bool,
+) -> tuple:
+    """
+    Fetch une image pour une slide de section selon le mode.
+    Retourne (image_bytes | None, photographer, source).
+    """
+    # Stratégie selon le mode
+    if mode == ImageMode.PREMIUM:
+        use_stability = True
+    elif mode == ImageMode.QUALITE:
+        # Routage rule-based : abstract → Stability, concrete → stock
+        topic = _classify_section_topic(title)
+        use_stability = (topic == "abstract" and _stability_configured())
+    else:  # STANDARD
+        use_stability = False
+
+    if use_stability:
+        prompt = _build_stability_prompt(title, chapitre, specialite, niveau)
+        seed = _stability_seed_for(title)
+        img = await _fetch_stability_image(prompt, seed=seed)
+        if img:
+            return img, "", "Stability AI"
+        # Fallback stock si Stability échoue (quota, etc.)
+
+    # Provider stock préféré (alterne pour la diversité visuelle)
+    def _pref_for(i: int) -> str:
+        if has_uns and not has_pex: return "unsplash"
+        if has_pex and not has_uns: return "pexels"
+        return "unsplash" if i % 2 == 0 else "pexels"
+
+    img, photog, source, url = await _fetch_hybrid_image(
+        title,
+        f"{title} {chapitre}".strip(),
+        chapitre,
+        f"{specialite} {module}".strip(),
+        specialite,
+        prefer=_pref_for(idx),
+        exclude_urls=seen_urls,
+    )
+    if url:
+        seen_urls.add(url)
+    return img, photog or "", source or ""
+
+
+async def _fetch_section_images(titles: list[str], specialite: str, module: str,
+                                 chapitre: str, niveau: str = "",
+                                 mode: ImageMode = ImageMode.STANDARD) -> dict:
+    """
+    Pour chaque titre de section, fetch une image en parallèle selon le `mode` :
+
+    - STANDARD : Unsplash → Pexels (gratuit).
+    - QUALITE  : routage rule-based — sujets abstraits via Stability AI, sujets
+                 concrets via stock. Fallback stock si Stability indisponible.
+    - PREMIUM  : Stability AI sur toutes les sections, stock en filet de
+                 sécurité si la génération échoue.
+
+    Retourne {titre_section: {'bytes': bytes, 'photographer': str, 'source': str}}.
+    """
+    if not titles:
+        return {}
+    has_uns, has_pex = _unsplash_configured(), _pexels_configured()
+    has_stab = _stability_configured()
+    # Si aucun fournisseur capable de servir le mode demandé, sortie immédiate.
+    if mode == ImageMode.PREMIUM and not has_stab and not has_uns and not has_pex:
+        return {}
+    if mode != ImageMode.PREMIUM and not has_uns and not has_pex and not has_stab:
+        return {}
+
+    seen_urls: set = set()
+
+    async def _one(idx: int, title: str):
+        try:
+            result = await _fetch_one_section_image(
+                title, idx, mode, specialite, module, chapitre, niveau,
+                seen_urls, has_uns, has_pex,
+            )
+            return title, result
+        except Exception as e:
+            print(f"[IMAGE] Erreur fetch '{title}' : {e}")
+            return title, (None, "", "")
+
+    results = await asyncio.gather(
+        *[_one(i, t) for i, t in enumerate(titles)],
+        return_exceptions=True,
+    )
+
+    out: dict = {}
+    for r in results:
+        if isinstance(r, Exception) or not r:
+            continue
+        title, (img, photog, source) = r
+        if not img:
+            continue
+        out[title] = {
+            "bytes": img,
+            "photographer": photog or "",
+            "source": source or "",
+        }
+    return out
+
+
+async def _fetch_title_image(specialite: str, module: str, chapitre: str,
+                              niveau: str = "",
+                              mode: ImageMode = ImageMode.STANDARD) -> tuple:
+    """
+    Fetch l'image de la slide titre selon le mode. En mode PREMIUM, utilise
+    Stability ; sinon, comportement historique (Unsplash uniquement).
+
+    Retourne (bytes | None, photographer, source).
+    """
+    if mode == ImageMode.PREMIUM and _stability_configured():
+        # Prompt légèrement différent : sujet = chapitre, pas section
+        prompt = _build_stability_prompt(chapitre, module, specialite, niveau)
+        seed = _stability_seed_for(f"TITLE::{chapitre}")
+        img = await _fetch_stability_image(prompt, seed=seed)
+        if img:
+            return img, "", "Stability AI"
+        # Fallback Unsplash si Stability échoue
+
+    img, photog, _url = await _fetch_unsplash_image(
+        chapitre,
+        f"{specialite} {chapitre}".strip(),
+        specialite,
+        module,
+    )
+    return img, photog or "", "Unsplash" if img else ""
 
 
 @app.post("/generate-pptx")
 @limiter.limit("20/minute")
 async def generate_pptx(request: Request, body: PptxRequest):
-    image_bytes, photographer = await _fetch_unsplash_image(
-        body.chapitre,                              # plus spécifique (le topic)
-        f"{body.specialite} {body.chapitre}",       # combinaison
-        body.specialite,                            # spécialité seule
-        body.module,                                # module seul en dernier
+    _reset_image_costs()
+
+    # Slide titre : Unsplash en standard/qualité, Stability en premium
+    image_bytes, photographer, title_source = await _fetch_title_image(
+        body.specialite, body.module, body.chapitre, body.niveau,
+        mode=body.image_mode,
     )
+
+    # Images de section : extraction des H2 puis fetch en parallèle selon mode
+    section_titles = _extract_section_titles_from_markdown(body.contenu)
+    section_images = await _fetch_section_images(
+        section_titles, body.specialite, body.module, body.chapitre, body.niveau,
+        mode=body.image_mode,
+    ) if section_titles else {}
+
+    _log_image_costs(f"/generate-pptx mode={body.image_mode.value} sections={len(section_titles)}")
 
     try:
         pptx_bytes = markdown_to_pptx(
@@ -530,6 +1059,8 @@ async def generate_pptx(request: Request, body: PptxRequest):
             niveau=body.niveau,
             title_image=image_bytes,
             photographer=photographer or "",
+            title_source=title_source,
+            section_images=section_images,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint : {e}")
@@ -614,12 +1145,20 @@ async def get_historique(
 @app.post("/generate-v2/pptx")
 async def generate_v2_pptx(request: PptxV2Request):
     """Génère un PPTX depuis le slides_json de l'Agent Designer (pipeline V2)."""
-    image_bytes, photographer = await _fetch_unsplash_image(
-        request.chapitre,
-        f"{request.specialite} {request.chapitre}",
-        request.specialite,
-        request.module,
+    _reset_image_costs()
+
+    image_bytes, photographer, title_source = await _fetch_title_image(
+        request.specialite, request.module, request.chapitre, request.niveau,
+        mode=request.image_mode,
     )
+    section_titles = _extract_section_titles_from_slides_json(request.slides_json)
+    section_images = await _fetch_section_images(
+        section_titles, request.specialite, request.module, request.chapitre,
+        request.niveau, mode=request.image_mode,
+    ) if section_titles else {}
+
+    _log_image_costs(f"/generate-v2/pptx mode={request.image_mode.value} sections={len(section_titles)}")
+
     try:
         pptx_bytes = slides_json_to_pptx(
             slides_json=request.slides_json,
@@ -629,6 +1168,8 @@ async def generate_v2_pptx(request: PptxV2Request):
             niveau=request.niveau,
             title_image=image_bytes,
             photographer=photographer or "",
+            title_source=title_source,
+            section_images=section_images,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur génération PowerPoint V2 : {e}")
