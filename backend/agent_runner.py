@@ -276,13 +276,37 @@ def _validate_agent_output(agent_name: str, data: dict) -> tuple[bool, str]:
     Retourne (is_valid, error_message).
     """
     if agent_name == "pedagogique":
-        for key in ["titre", "objectifs_pedagogiques", "plan", "concepts_cles"]:
+        for key in ["titre", "objectifs_pedagogiques", "plan", "concepts_cles", "couverture"]:
             if key not in data:
                 return False, f"Clé manquante : '{key}'"
-        if not isinstance(data["plan"], list) or len(data["plan"]) < 2:
+        plan = data["plan"]
+        if not isinstance(plan, list) or len(plan) < 2:
             return False, "Le plan doit contenir au moins 2 parties"
-        if not isinstance(data["objectifs_pedagogiques"], list) or len(data["objectifs_pedagogiques"]) < 2:
+        objectifs = data["objectifs_pedagogiques"]
+        if not isinstance(objectifs, list) or len(objectifs) < 2:
             return False, "Il faut au moins 2 objectifs pédagogiques"
+
+        # Validation 'couverture' : alignement objectifs ↔ sous-parties
+        couverture = data["couverture"]
+        if not isinstance(couverture, dict):
+            return False, "'couverture' doit être un objet {numero_objectif: [codes_sous_parties]}"
+
+        valid_codes: set[str] = set()
+        for partie in plan:
+            partie_code = partie.get("partie", "")
+            for sp in partie.get("sous_parties", []):
+                valid_codes.add(f"{partie_code}.{sp.get('code', '')}")
+
+        for i in range(1, len(objectifs) + 1):
+            refs = couverture.get(str(i))
+            if not isinstance(refs, list) or not refs:
+                return False, f"'couverture' : objectif {i} doit lister au moins une sous-partie"
+            for code in refs:
+                if code not in valid_codes:
+                    return False, (
+                        f"'couverture' : code '{code}' (objectif {i}) absent du plan. "
+                        f"Codes valides : {sorted(valid_codes)}"
+                    )
 
     elif agent_name == "redacteur":
         for key in ["introduction", "parties", "definitions", "points_cles"]:

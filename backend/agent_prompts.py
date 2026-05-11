@@ -21,6 +21,54 @@ def _catalog_block(code_moodle, semestre, heures, numero_chapitre) -> str:
     return f"\n\n{ctx}" if ctx else ""
 
 
+# Verbes Bloom calibrés par niveau d'études.
+# "bas"  = verbes de bas niveau cognitif (rappel/compréhension/application)
+# "haut" = verbes de haut niveau (analyse/évaluation/création) adaptés au niveau cible
+# Au moins 1 objectif "bas" et 1 objectif "haut" doivent être présents.
+_BLOOM_VERBS: dict[str, dict[str, list[str]]] = {
+    "L1": {
+        "bas":  ["Définir", "Identifier", "Citer", "Lister", "Reconnaître", "Décrire"],
+        "haut": ["Calculer", "Appliquer", "Utiliser", "Résoudre", "Illustrer"],
+    },
+    "L2": {
+        "bas":  ["Définir", "Décrire", "Expliquer", "Reformuler"],
+        "haut": ["Appliquer", "Calculer", "Comparer", "Distinguer", "Classer"],
+    },
+    "L3": {
+        "bas":  ["Expliquer", "Décrire", "Caractériser"],
+        "haut": ["Analyser", "Comparer", "Interpréter", "Diagnostiquer", "Modéliser"],
+    },
+    "M1": {
+        "bas":  ["Analyser", "Comparer", "Interpréter"],
+        "haut": ["Évaluer", "Argumenter", "Modéliser", "Critiquer", "Synthétiser"],
+    },
+    "M2": {
+        "bas":  ["Évaluer", "Critiquer", "Argumenter"],
+        "haut": ["Concevoir", "Formaliser", "Élaborer", "Problématiser", "Produire"],
+    },
+}
+# Alias Bachelor (B1/B2/B3) sur le même barème que la licence
+_BLOOM_VERBS["B1"] = _BLOOM_VERBS["L1"]
+_BLOOM_VERBS["B2"] = _BLOOM_VERBS["L2"]
+_BLOOM_VERBS["B3"] = _BLOOM_VERBS["L3"]
+
+
+def _bloom_block(niveau: str) -> str:
+    """Retourne un bloc d'instructions Bloom pour le niveau, ou '' si inconnu."""
+    spec = _BLOOM_VERBS.get(niveau.strip().upper())
+    if spec is None:
+        return ""
+    bas = ", ".join(spec["bas"])
+    haut = ", ".join(spec["haut"])
+    return (
+        f"VERBES D'OBJECTIFS (taxonomie de Bloom adaptée au niveau {niveau}) :\n"
+        f"- Bas niveau cognitif — utilise AU MOINS 1 verbe parmi : {bas}.\n"
+        f"- Haut niveau cognitif — utilise AU MOINS 1 verbe parmi : {haut}.\n"
+        "Chaque objectif DOIT commencer par l'un de ces verbes à l'infinitif. "
+        "Évite les verbes vagues : 'Maîtriser', 'Connaître', 'Comprendre', 'Aborder', 'Savoir', 'Appréhender'."
+    )
+
+
 # ── Agent 1 : Pédagogique ────────────────────────────────────────────────────
 
 def build_agent_pedagogique_system() -> str:
@@ -42,11 +90,19 @@ def build_agent_pedagogique_user(
     niveau_desc = get_niveau_description(niveau)
     pos = _chapitre_pos(numero_chapitre)
     catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
+    bloom = _bloom_block(niveau)
+    bloom_section = f"\n\n{bloom}" if bloom else ""
     return f"""Génère un plan pédagogique JSON pour ce cours universitaire :
 - Spécialité : {specialite}
 - Niveau : {niveau} ({niveau_desc})
 - Module : {module}
-- Chapitre : {chapitre}{pos}{catalog}
+- Chapitre : {chapitre}{pos}{catalog}{bloom_section}
+
+CONTRAINTE DE COHÉRENCE :
+Le champ "couverture" associe chaque objectif (numéroté de 1 à 5) aux sous-parties
+qui le traitent. Format des codes : "I.A", "I.B", "II.A", "III.C", etc.
+(numéro romain de la partie + point + lettre de la sous-partie). Chaque objectif
+doit être couvert par AU MOINS une sous-partie ; les codes doivent exister dans le plan.
 
 Retourne UNIQUEMENT ce JSON (sans aucun markdown autour) :
 {{
@@ -81,6 +137,13 @@ Retourne UNIQUEMENT ce JSON (sans aucun markdown autour) :
   ],
   "concepts_cles": ["<concept 1>", "<concept 2>", "<concept 3>", "<concept 4>"],
   "niveau_cible": "{niveau}",
+  "couverture": {{
+    "1": ["I.A"],
+    "2": ["I.B", "I.C"],
+    "3": ["II.A"],
+    "4": ["II.B"],
+    "5": ["III.A", "III.B"]
+  }},
   "conseils_pedagogiques": "<1-2 phrases sur la pédagogie recommandée>"
 }}"""
 
