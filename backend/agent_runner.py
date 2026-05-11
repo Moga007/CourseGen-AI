@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal
 
@@ -15,7 +16,16 @@ from agents_config import (
     VALID_LAYOUTS,
     AgentConfig,
 )
+from agent_prompts import BANNED_OBJECTIVE_VERBS
 from ai_engines import get_engine
+
+
+def _normalize_verb(word: str) -> str:
+    """Lowercase + sans accents, pour comparer un verbe à la liste noire."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", word.lower())
+        if not unicodedata.combining(c)
+    )
 
 
 # ── Types ────────────────────────────────────────────────────────────────────
@@ -285,6 +295,18 @@ def _validate_agent_output(agent_name: str, data: dict) -> tuple[bool, str]:
         objectifs = data["objectifs_pedagogiques"]
         if not isinstance(objectifs, list) or len(objectifs) < 2:
             return False, "Il faut au moins 2 objectifs pédagogiques"
+
+        # Refuse les verbes vagues en tête d'objectif (Maîtriser, Comprendre, etc.)
+        for i, obj in enumerate(objectifs, start=1):
+            if not isinstance(obj, str) or not obj.strip():
+                return False, f"Objectif {i} vide ou invalide"
+            first_word = obj.strip().split()[0]
+            if _normalize_verb(first_word) in BANNED_OBJECTIVE_VERBS:
+                return False, (
+                    f"Objectif {i} commence par un verbe interdit ('{first_word}'). "
+                    f"Verbes bannis : {list(BANNED_OBJECTIVE_VERBS)}. "
+                    "Utilise un verbe Bloom précis (Définir, Calculer, Analyser, Évaluer, Concevoir…)."
+                )
 
         # Validation 'couverture' : alignement objectifs ↔ sous-parties
         couverture = data["couverture"]

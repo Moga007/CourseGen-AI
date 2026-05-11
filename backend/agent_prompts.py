@@ -52,6 +52,12 @@ _BLOOM_VERBS["B1"] = _BLOOM_VERBS["L1"]
 _BLOOM_VERBS["B2"] = _BLOOM_VERBS["L2"]
 _BLOOM_VERBS["B3"] = _BLOOM_VERBS["L3"]
 
+# Verbes vagues interdits pour démarrer un objectif pédagogique.
+# Validation stricte côté runner : rejet et retry si présent.
+BANNED_OBJECTIVE_VERBS: tuple[str, ...] = (
+    "maitriser", "connaitre", "comprendre", "aborder", "savoir", "apprehender",
+)
+
 
 def _bloom_block(niveau: str) -> str:
     """Retourne un bloc d'instructions Bloom pour le niveau, ou '' si inconnu."""
