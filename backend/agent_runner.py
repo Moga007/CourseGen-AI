@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal
 
@@ -15,7 +16,16 @@ from agents_config import (
     VALID_LAYOUTS,
     AgentConfig,
 )
+from agent_prompts import BANNED_OBJECTIVE_VERBS
 from ai_engines import get_engine
+
+
+def _normalize_verb(word: str) -> str:
+    """Lowercase + sans accents, pour comparer un verbe à la liste noire."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", word.lower())
+        if not unicodedata.combining(c)
+    )
 
 
 # ── Types ────────────────────────────────────────────────────────────────────
@@ -276,13 +286,49 @@ def _validate_agent_output(agent_name: str, data: dict) -> tuple[bool, str]:
     Retourne (is_valid, error_message).
     """
     if agent_name == "pedagogique":
-        for key in ["titre", "objectifs_pedagogiques", "plan", "concepts_cles"]:
+        for key in ["titre", "objectifs_pedagogiques", "plan", "concepts_cles", "couverture"]:
             if key not in data:
                 return False, f"Clé manquante : '{key}'"
-        if not isinstance(data["plan"], list) or len(data["plan"]) < 2:
+        plan = data["plan"]
+        if not isinstance(plan, list) or len(plan) < 2:
             return False, "Le plan doit contenir au moins 2 parties"
-        if not isinstance(data["objectifs_pedagogiques"], list) or len(data["objectifs_pedagogiques"]) < 2:
+        objectifs = data["objectifs_pedagogiques"]
+        if not isinstance(objectifs, list) or len(objectifs) < 2:
             return False, "Il faut au moins 2 objectifs pédagogiques"
+
+        # Refuse les verbes vagues en tête d'objectif (Maîtriser, Comprendre, etc.)
+        for i, obj in enumerate(objectifs, start=1):
+            if not isinstance(obj, str) or not obj.strip():
+                return False, f"Objectif {i} vide ou invalide"
+            first_word = obj.strip().split()[0]
+            if _normalize_verb(first_word) in BANNED_OBJECTIVE_VERBS:
+                return False, (
+                    f"Objectif {i} commence par un verbe interdit ('{first_word}'). "
+                    f"Verbes bannis : {list(BANNED_OBJECTIVE_VERBS)}. "
+                    "Utilise un verbe Bloom précis (Définir, Calculer, Analyser, Évaluer, Concevoir…)."
+                )
+
+        # Validation 'couverture' : alignement objectifs ↔ sous-parties
+        couverture = data["couverture"]
+        if not isinstance(couverture, dict):
+            return False, "'couverture' doit être un objet {numero_objectif: [codes_sous_parties]}"
+
+        valid_codes: set[str] = set()
+        for partie in plan:
+            partie_code = partie.get("partie", "")
+            for sp in partie.get("sous_parties", []):
+                valid_codes.add(f"{partie_code}.{sp.get('code', '')}")
+
+        for i in range(1, len(objectifs) + 1):
+            refs = couverture.get(str(i))
+            if not isinstance(refs, list) or not refs:
+                return False, f"'couverture' : objectif {i} doit lister au moins une sous-partie"
+            for code in refs:
+                if code not in valid_codes:
+                    return False, (
+                        f"'couverture' : code '{code}' (objectif {i}) absent du plan. "
+                        f"Codes valides : {sorted(valid_codes)}"
+                    )
 
     elif agent_name == "redacteur":
         for key in ["introduction", "parties", "definitions", "points_cles"]:
