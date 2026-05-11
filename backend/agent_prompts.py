@@ -59,6 +59,43 @@ BANNED_OBJECTIVE_VERBS: tuple[str, ...] = (
 )
 
 
+# Calibrage des pistes "Pour aller plus loin" selon le niveau cible.
+# Un B1 ne doit pas être renvoyé vers la recherche académique avancée.
+_FURTHER_READING_GUIDE: dict[str, str] = {
+    "L1": (
+        "Pistes ACCESSIBLES à un débutant : manuels d'introduction, vidéos pédagogiques, "
+        "podcasts grand public, articles de presse vulgarisée. "
+        "INTERDIT : articles de recherche académique, Prix Nobel, ouvrages théoriques avancés."
+    ),
+    "L2": (
+        "Pistes adaptées à un niveau intermédiaire : manuels universitaires de référence, "
+        "ouvrages de vulgarisation experte, articles de presse spécialisée. "
+        "Reste sur des sources accessibles ; pas de littérature de recherche."
+    ),
+    "L3": (
+        "Pistes adaptées à un niveau avancé pré-master : ouvrages universitaires de référence, "
+        "articles professionnels, premières lectures classiques du domaine."
+    ),
+    "M1": (
+        "Pistes de niveau master : articles académiques accessibles, ouvrages d'auteurs "
+        "majeurs du domaine, revues spécialisées, premières références à la recherche actuelle."
+    ),
+    "M2": (
+        "Pistes de niveau expert : articles de recherche récents, ouvrages théoriques avancés, "
+        "débats académiques actuels, références aux courants théoriques et auteurs de premier plan "
+        "(Prix Nobel, écoles de pensée, état de l'art)."
+    ),
+}
+_FURTHER_READING_GUIDE["B1"] = _FURTHER_READING_GUIDE["L1"]
+_FURTHER_READING_GUIDE["B2"] = _FURTHER_READING_GUIDE["L2"]
+_FURTHER_READING_GUIDE["B3"] = _FURTHER_READING_GUIDE["L3"]
+
+
+def _further_reading_guide(niveau: str) -> str:
+    """Retourne la consigne 'pour_aller_plus_loin' adaptée au niveau, ou '' si inconnu."""
+    return _FURTHER_READING_GUIDE.get(niveau.strip().upper(), "")
+
+
 def _bloom_block(niveau: str) -> str:
     """Retourne un bloc d'instructions Bloom pour le niveau, ou '' si inconnu."""
     spec = _BLOOM_VERBS.get(niveau.strip().upper())
@@ -175,6 +212,8 @@ def build_agent_redacteur_user(
     niveau_desc = get_niveau_description(niveau)
     pos = _chapitre_pos(numero_chapitre)
     catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
+    further = _further_reading_guide(niveau)
+    further_line = f" {further}" if further else ""
     return f"""Rédige le contenu complet du cours en JSON à partir du plan ci-dessous.
 
 CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}{pos}{catalog}
@@ -189,10 +228,13 @@ CONSIGNES DE RÉDACTION :
   avec définitions, explications, et liens avec la spécialité {specialite}
 - exemples : liste de 2 exemples concrets et contextualisés pour la spécialité
 - applications_pratiques : cas pratique détaillé de 120-150 mots
-- definitions : 5 termes clés du chapitre avec définitions précises (2-3 phrases chacune)
+- definitions : reprends IMPÉRATIVEMENT chaque terme listé dans plan.concepts_cles
+  comme clé du dictionnaire 'definitions', avec une définition précise (2-3 phrases).
+  Si le plan contient moins de 5 concepts, complète avec au plus 1 ou 2 termes
+  essentiels supplémentaires extraits du contenu (mais jamais à la place d'un concept du plan).
 - points_cles : 5 points essentiels à retenir, formulés en phrases complètes
 - questions_revision : 4 questions de révision pour auto-évaluation
-- pour_aller_plus_loin : 3 pistes d'approfondissement (livres, concepts, méthodes)
+- pour_aller_plus_loin : 3 pistes d'approfondissement (livres, concepts, méthodes).{further_line}
 
 Retourne UNIQUEMENT ce JSON (sans balises markdown autour) :
 {{
