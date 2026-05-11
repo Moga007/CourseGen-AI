@@ -96,6 +96,55 @@ def _further_reading_guide(niveau: str) -> str:
     return _FURTHER_READING_GUIDE.get(niveau.strip().upper(), "")
 
 
+# Progression Bloom pour les 4 questions de révision, calibrée par niveau.
+# Q1 = niveau le plus bas (restitution), Q4 = niveau le plus haut adapté au cycle.
+_QUESTIONS_REVISION_GUIDE: dict[str, str] = {
+    "L1": (
+        "Progression Bloom obligatoire sur les 4 questions :\n"
+        "  Q1 : RESTITUTION (cite, nomme, définis un terme du cours).\n"
+        "  Q2 : COMPRÉHENSION (explique avec tes mots, illustre par un exemple).\n"
+        "  Q3 : APPLICATION (applique une formule ou méthode à un cas simple donné).\n"
+        "  Q4 : ANALYSE GUIDÉE (distingue ou compare deux situations simples du cours)."
+    ),
+    "L2": (
+        "Progression Bloom obligatoire sur les 4 questions :\n"
+        "  Q1 : RESTITUTION (définis, nomme).\n"
+        "  Q2 : COMPRÉHENSION (explique, donne un exemple).\n"
+        "  Q3 : APPLICATION à un cas concret.\n"
+        "  Q4 : ANALYSE (compare, distingue, justifie)."
+    ),
+    "L3": (
+        "Progression Bloom obligatoire sur les 4 questions :\n"
+        "  Q1 : DÉFINITION précise du vocabulaire central.\n"
+        "  Q2 : APPLICATION raisonnée à un cas.\n"
+        "  Q3 : ANALYSE (compare des modèles, hypothèses ou approches).\n"
+        "  Q4 : ÉVALUATION simple (juge la pertinence, choisis entre alternatives)."
+    ),
+    "M1": (
+        "Progression Bloom obligatoire sur les 4 questions :\n"
+        "  Q1 : DÉFINITION / cadrage conceptuel.\n"
+        "  Q2 : ANALYSE d'un cas ou d'un modèle.\n"
+        "  Q3 : ÉVALUATION critique d'une thèse, d'un modèle ou d'un cas.\n"
+        "  Q4 : ARGUMENTATION ou SYNTHÈSE (positionne-toi, propose un cadre)."
+    ),
+    "M2": (
+        "Progression Bloom obligatoire sur les 4 questions :\n"
+        "  Q1 : ANALYSE critique d'un cadre théorique.\n"
+        "  Q2 : ÉVALUATION comparée de deux approches ou modèles.\n"
+        "  Q3 : CONCEPTION / PROPOSITION d'une architecture, solution ou cadre.\n"
+        "  Q4 : PROBLÉMATISATION ouverte (formule une question de recherche, identifie un débat actuel)."
+    ),
+}
+_QUESTIONS_REVISION_GUIDE["B1"] = _QUESTIONS_REVISION_GUIDE["L1"]
+_QUESTIONS_REVISION_GUIDE["B2"] = _QUESTIONS_REVISION_GUIDE["L2"]
+_QUESTIONS_REVISION_GUIDE["B3"] = _QUESTIONS_REVISION_GUIDE["L3"]
+
+
+def _questions_revision_guide(niveau: str) -> str:
+    """Retourne la consigne de progression Bloom pour les 4 questions, ou '' si inconnu."""
+    return _QUESTIONS_REVISION_GUIDE.get(niveau.strip().upper(), "")
+
+
 def _bloom_block(niveau: str) -> str:
     """Retourne un bloc d'instructions Bloom pour le niveau, ou '' si inconnu."""
     spec = _BLOOM_VERBS.get(niveau.strip().upper())
@@ -214,6 +263,8 @@ def build_agent_redacteur_user(
     catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
     further = _further_reading_guide(niveau)
     further_line = f" {further}" if further else ""
+    questions_guide = _questions_revision_guide(niveau)
+    questions_block = f"\n  {questions_guide}" if questions_guide else ""
     return f"""Rédige le contenu complet du cours en JSON à partir du plan ci-dessous.
 
 CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}{pos}{catalog}
@@ -233,7 +284,7 @@ CONSIGNES DE RÉDACTION :
   Si le plan contient moins de 5 concepts, complète avec au plus 1 ou 2 termes
   essentiels supplémentaires extraits du contenu (mais jamais à la place d'un concept du plan).
 - points_cles : 5 points essentiels à retenir, formulés en phrases complètes
-- questions_revision : 4 questions de révision pour auto-évaluation
+- questions_revision : 4 questions de révision pour auto-évaluation.{questions_block}
 - pour_aller_plus_loin : 3 pistes d'approfondissement (livres, concepts, méthodes).{further_line}
 
 Retourne UNIQUEMENT ce JSON (sans balises markdown autour) :
