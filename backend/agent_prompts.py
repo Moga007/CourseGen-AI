@@ -454,9 +454,13 @@ Retourne UNIQUEMENT ce JSON :
 def build_agent_qualite_system() -> str:
     return (
         "Tu es un expert en assurance qualité pédagogique universitaire. "
-        "Tu évalues et valides un cours généré par un pipeline multi-agents. "
+        "Tu évalues un cours généré par un pipeline multi-agents en produisant un rapport "
+        "de vérification CHECK-LIST détaillé : tu inspectes la couverture des objectifs, "
+        "l'alignement du glossaire sur les concepts du plan, le calibrage du niveau (Bloom, "
+        "exemples, références) et la progression cognitive des questions. "
         "Tu retournes UNIQUEMENT du JSON strict, sans texte avant ou après. "
-        "Ton rôle est d'évaluer la qualité, pas de réécrire le contenu."
+        "Tu ÉVALUES, tu ne RÉÉCRIS PAS le contenu : 'slides_final' est une copie identique "
+        "de l'input 'slides'."
     )
 
 
@@ -489,15 +493,53 @@ CONTENU RÉDIGÉ (résumé) :
 SLIDES :
 {slides_json}
 
+VÉRIFICATIONS À EFFECTUER (rapport check-list) :
+
+1. **Couverture des objectifs** — pour CHAQUE objectif numéroté de plan.objectifs_pedagogiques :
+   regarde plan.couverture[n] pour identifier les sous-parties qui le portent, puis vérifie dans
+   contenu.parties que ces sous-parties traitent EFFECTIVEMENT la compétence visée par l'objectif.
+   Si une sous-partie listée ne couvre pas réellement l'objectif, signale un écart précis.
+
+2. **Glossaire aligné** — vérifie que CHAQUE terme listé dans plan.concepts_cles apparaît bien
+   dans contenu.definitions. Signale tout concept manquant ou tout terme du glossaire qui ne
+   serait pas dans concepts_cles (au-delà de 1 ajout toléré).
+
+3. **Calibrage Bloom du niveau {niveau}** — les verbes d'objectifs sont-ils adaptés au niveau ?
+   La complexité du contenu (introduction, sous_parties) est-elle adaptée ? Pas de jargon
+   avancé en B1/L1, pas de simplification excessive en M1/M2.
+
+4. **Calibrage des exemples** — pour {niveau} : un B1/L1 doit recevoir des exemples du quotidien
+   (commerce de proximité, vie étudiante) ; un M2 des cas documentés avec données. Examine
+   sous_parties.exemples[0] et signale toute dérive.
+
+5. **Calibrage 'pour aller plus loin'** — pour {niveau} : pas de Prix Nobel ni recherche
+   académique avancée en B1/L1 ; pas de manuels d'introduction en M1/M2. Examine
+   contenu.pour_aller_plus_loin.
+
+6. **Progression Bloom des questions de révision** — les 4 questions de
+   contenu.questions_revision doivent suivre une progression croissante (Q1 plus simple
+   cognitivement que Q4). Vérifie la gradation.
+
 Retourne UNIQUEMENT ce JSON :
 {{
   "validation": {{
     "score_global": <entier 0-100>,
     "conformite_niveau": <true|false>,
     "couverture_objectifs": <true|false>,
-    "corrections_appliquees": ["<correction concrète 1>", "<correction 2>"]
+    "verifications": {{
+      "objectifs_couverts": {{"1": <true|false>, "2": <true|false>, "3": <true|false>, "4": <true|false>, "5": <true|false>}},
+      "glossaire_aligne_concepts_cles": <true|false>,
+      "calibrage_niveau_contenu": <true|false>,
+      "calibrage_exemples": <true|false>,
+      "calibrage_pour_aller_plus_loin": <true|false>,
+      "progression_bloom_questions": <true|false>
+    }},
+    "ecarts_detectes": [
+      "<écart concret et précis 1 — référence à un objectif, une sous-partie ou un terme>",
+      "<écart 2>"
+    ]
   }},
-  "slides_final": <structure slides JSON validée, même format que l'input>,
+  "slides_final": <copie IDENTIQUE de l'input 'slides' ci-dessus — ne pas modifier>,
   "resume_executif": "<1-2 phrases résumant le cours généré>"
 }}"""
 

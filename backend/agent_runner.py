@@ -540,14 +540,20 @@ async def run_pipeline_cours(
 
         elif agent_config.name == "qualite":
             plan_json = json.dumps(ctx["pedagogique"], ensure_ascii=False)
-            # Résumé du contenu rédigé pour ne pas dépasser la fenêtre contextuelle
+            # Résumé du contenu rédigé pour ne pas dépasser la fenêtre contextuelle.
+            # Inclut un exemple par sous-partie + questions_revision + pour_aller_plus_loin
+            # pour permettre les verifications de calibrage par l'agent Qualite.
             contenu_resume = {
                 "introduction": ctx["redacteur"].get("introduction", ""),
                 "parties": [
                     {
                         **p,
                         "sous_parties": [
-                            {**sp, "contenu": sp.get("contenu", "")[:500]}
+                            {
+                                **sp,
+                                "contenu": sp.get("contenu", "")[:500],
+                                "exemples": [str(e)[:200] for e in sp.get("exemples", [])][:1],
+                            }
                             for sp in p.get("sous_parties", [])
                         ],
                     }
@@ -556,6 +562,8 @@ async def run_pipeline_cours(
                 "points_cles":   ctx["redacteur"].get("points_cles", []),
                 "definitions":   ctx["redacteur"].get("definitions", {}),
                 "applications_pratiques": ctx["redacteur"].get("applications_pratiques", "")[:500],
+                "questions_revision":     ctx["redacteur"].get("questions_revision", []),
+                "pour_aller_plus_loin":   ctx["redacteur"].get("pour_aller_plus_loin", []),
             }
             contenu_resume_json = json.dumps(contenu_resume, ensure_ascii=False)
             slides_json = json.dumps(ctx["designer"], ensure_ascii=False)
