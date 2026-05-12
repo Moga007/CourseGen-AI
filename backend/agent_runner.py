@@ -124,7 +124,9 @@ def _build_markdown_from_redacteur(ctx: dict) -> str:
     if questions:
         lines.append("\n\n## Questions de Révision\n")
         for i, q in enumerate(questions, 1):
-            lines.append(f"\n{i}. {q}")
+            # Strip un eventuel prefixe "N. " / "N) " que le modele aurait ajoute
+            q_clean = re.sub(r"^\s*\d+\s*[.)\-]\s*", "", str(q))
+            lines.append(f"\n{i}. {q_clean}")
 
     # Pour aller plus loin
     plus_loin = red.get("pour_aller_plus_loin", [])
