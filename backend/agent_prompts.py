@@ -145,6 +145,51 @@ def _questions_revision_guide(niveau: str) -> str:
     return _QUESTIONS_REVISION_GUIDE.get(niveau.strip().upper(), "")
 
 
+# Calibrage des exemples illustratifs selon le niveau cible.
+# Objectif : un B1 doit pouvoir visualiser l'exemple sans connaissance prealable
+# du monde de l'entreprise ; un M2 doit recevoir des cas analytiquement riches.
+_EXAMPLES_GUIDE: dict[str, str] = {
+    "L1": (
+        "Exemples ANCRÉS DANS LE QUOTIDIEN d'un débutant : commerce de proximité "
+        "(boulangerie, supérette, coiffeur), vie étudiante, achats personnels, "
+        "petite entreprise locale, situations vécues. Évite les multinationales obscures, "
+        "les sigles boursiers et les cas sectoriels complexes. Une marque grand public "
+        "très connue (Carrefour, McDonald's, Decathlon) est OK ponctuellement si elle "
+        "rend l'exemple plus parlant. Privilégie la simplicité et le concret immédiat."
+    ),
+    "L2": (
+        "Exemples mêlant quotidien et PME locale/régionale, avec 1 référence "
+        "ponctuelle à une marque grand public connue. Reste sur des situations "
+        "facilement visualisables par un étudiant de 2e année, sans présupposer "
+        "une culture du monde des affaires avancée."
+    ),
+    "L3": (
+        "Exemples d'entreprises connues (PME ou grandes), cas sectoriels représentatifs. "
+        "Tu peux mentionner des cas réels d'entreprises françaises ou européennes, "
+        "avec quelques chiffres clés pour ancrer le propos."
+    ),
+    "M1": (
+        "Exemples basés sur des entreprises et cas sectoriels précis : entreprises cotées, "
+        "données chiffrées, références d'articles de presse économique ou de rapports "
+        "professionnels. Privilégie des cas instructifs sur le plan analytique."
+    ),
+    "M2": (
+        "Exemples de niveau expert : études de cas sectorielles documentées, données "
+        "empiriques, cas internationaux comparatifs, références à des entreprises "
+        "emblématiques d'un débat ou d'une école de pensée. Mentionne périodes, chiffres "
+        "et sources si pertinent."
+    ),
+}
+_EXAMPLES_GUIDE["B1"] = _EXAMPLES_GUIDE["L1"]
+_EXAMPLES_GUIDE["B2"] = _EXAMPLES_GUIDE["L2"]
+_EXAMPLES_GUIDE["B3"] = _EXAMPLES_GUIDE["L3"]
+
+
+def _examples_guide(niveau: str) -> str:
+    """Retourne la consigne de calibrage des exemples adaptée au niveau, ou '' si inconnu."""
+    return _EXAMPLES_GUIDE.get(niveau.strip().upper(), "")
+
+
 def _bloom_block(niveau: str) -> str:
     """Retourne un bloc d'instructions Bloom pour le niveau, ou '' si inconnu."""
     spec = _BLOOM_VERBS.get(niveau.strip().upper())
@@ -265,6 +310,8 @@ def build_agent_redacteur_user(
     further_line = f" {further}" if further else ""
     questions_guide = _questions_revision_guide(niveau)
     questions_block = f"\n  {questions_guide}" if questions_guide else ""
+    examples = _examples_guide(niveau)
+    examples_line = f" {examples}" if examples else ""
     return f"""Rédige le contenu complet du cours en JSON à partir du plan ci-dessous.
 
 CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}{pos}{catalog}
@@ -277,7 +324,7 @@ CONSIGNES DE RÉDACTION :
 - introduction_partie : 2-3 phrases introduisant chaque grande partie
 - contenu de chaque sous_partie : 150 à 180 mots, développement académique rigoureux
   avec définitions, explications, et liens avec la spécialité {specialite}
-- exemples : liste de 2 exemples concrets et contextualisés pour la spécialité
+- exemples : liste de 2 exemples concrets et contextualisés pour la spécialité {specialite}.{examples_line}
 - applications_pratiques : cas pratique détaillé de 120-150 mots
 - definitions : reprends IMPÉRATIVEMENT chaque terme listé dans plan.concepts_cles
   comme clé du dictionnaire 'definitions', avec une définition précise (2-3 phrases).
