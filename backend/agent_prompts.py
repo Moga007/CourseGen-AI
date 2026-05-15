@@ -546,9 +546,51 @@ Retourne UNIQUEMENT ce JSON :
 
 # ── Agent Quiz ───────────────────────────────────────────────────────────────
 
+# Blueprint cognitif du quiz calibré par niveau : répartition Bloom cible
+# + style des questions. Un B1 ne doit pas être évalué comme un M2.
+_QUIZ_BLUEPRINT: dict[str, str] = {
+    "L1": (
+        "Répartition cognitive cible : ~55% RESTITUTION (définitions, faits, vocabulaire), "
+        "~30% COMPRÉHENSION (sens d'un concept, identifier l'exemple correct), "
+        "~15% APPLICATION simple (un calcul ou un cas direct). AUCUNE question d'analyse "
+        "complexe. Les QCM restent factuels, sans pièges retors ni doubles négations."
+    ),
+    "L2": (
+        "Répartition cognitive cible : ~40% RESTITUTION, ~35% COMPRÉHENSION, "
+        "~25% APPLICATION. Quelques QCM peuvent poser une mini-situation concrète."
+    ),
+    "L3": (
+        "Répartition cognitive cible : ~25% RESTITUTION, ~40% APPLICATION, "
+        "~35% ANALYSE (comparer, distinguer, justifier). Privilégie des QCM "
+        "contextualisés (mise en situation), pas du pur par-cœur."
+    ),
+    "M1": (
+        "Répartition cognitive cible : ~15% RESTITUTION, ~40% ANALYSE, "
+        "~45% ÉVALUATION/ARGUMENTATION. Les QCM sont des mises en situation exigeant "
+        "un raisonnement ; les réponses courtes demandent une justification."
+    ),
+    "M2": (
+        "Répartition cognitive cible : restitution minimale (<10%), majorité "
+        "ANALYSE CRITIQUE et ÉVALUATION. Chaque QCM repose sur un scénario, un cas "
+        "ou un débat — jamais du pur factuel ; les réponses courtes exigent une "
+        "prise de position argumentée."
+    ),
+}
+_QUIZ_BLUEPRINT["B1"] = _QUIZ_BLUEPRINT["L1"]
+_QUIZ_BLUEPRINT["B2"] = _QUIZ_BLUEPRINT["L2"]
+_QUIZ_BLUEPRINT["B3"] = _QUIZ_BLUEPRINT["L3"]
+
+
+def _quiz_blueprint(niveau: str) -> str:
+    """Retourne le blueprint cognitif du quiz adapté au niveau, ou '' si inconnu."""
+    return _QUIZ_BLUEPRINT.get(niveau.strip().upper(), "")
+
+
 def build_agent_quiz_system() -> str:
     return (
-        "Tu es un enseignant expert qui crée des évaluations au format GIFT (compatible Moodle). "
+        "Tu es un enseignant expert en docimologie qui crée des évaluations au format GIFT "
+        "(compatible Moodle). Tu construis un quiz aligné sur les objectifs pédagogiques du "
+        "cours et calibré sur le niveau cognitif du niveau d'études (taxonomie de Bloom). "
         "Tu produis du JSON strict contenant le quiz GIFT complet. "
         "Tu dois UNIQUEMENT retourner du JSON valide, sans balises markdown autour."
     )
@@ -564,6 +606,8 @@ def build_agent_quiz_user(
     niveau_desc = get_niveau_description(niveau)
     pos = _chapitre_pos(numero_chapitre)
     catalog = _catalog_block(code_moodle, semestre, heures, numero_chapitre)
+    blueprint = _quiz_blueprint(niveau)
+    blueprint_line = blueprint or f"Difficulté adaptée au niveau {niveau}."
     # Limite le contenu pour éviter le dépassement de contexte
     contenu_tronque = contenu_markdown[:6000] if len(contenu_markdown) > 6000 else contenu_markdown
     return f"""Génère un quiz GIFT Moodle à partir du cours suivant.
@@ -576,8 +620,17 @@ CONTENU DU COURS :
 INSTRUCTIONS :
 - 12 à 15 questions au total
 - Mélange de QCM (8), vrai/faux (3) et réponses courtes (2-4)
-- Couvre les concepts clés du cours
-- Difficulté adaptée au niveau {niveau}
+
+ALIGNEMENT SUR LES OBJECTIFS (alignement constructif) :
+Le cours contient une section « Objectifs pédagogiques » (liste à puces).
+CHAQUE objectif pédagogique listé doit être évalué par AU MOINS une question.
+Aucune question ne doit porter sur un point hors objectifs/concepts du cours.
+
+CALIBRAGE COGNITIF (niveau {niveau}) :
+{blueprint_line}
+Le verbe de chaque objectif indique le niveau Bloom attendu : une question évaluant
+un objectif « Définir… » teste la restitution ; un objectif « Analyser… » ou
+« Concevoir… » exige une question de mise en situation / raisonnement, pas du factuel.
 
 Retourne UNIQUEMENT ce JSON :
 {{
@@ -587,5 +640,6 @@ Retourne UNIQUEMENT ce JSON :
     "qcm": <n>,
     "vrai_faux": <n>,
     "reponse_courte": <n>
-  }}
+  }},
+  "couverture_objectifs": "<1 phrase : confirme que chaque objectif est couvert par >=1 question>"
 }}"""
