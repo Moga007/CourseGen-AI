@@ -190,6 +190,26 @@ def _examples_guide(niveau: str) -> str:
     return _EXAMPLES_GUIDE.get(niveau.strip().upper(), "")
 
 
+# Profil de densité du contenu calibré sur le volume horaire PAR CHAPITRE.
+# 'heures' = volume du module entier ; un cours IESIG = 12 chapitres,
+# donc heures/chapitre = heures / NB_CHAPITRES_PAR_COURS.
+# Valeurs catalogue réelles : 30/35/40/45/50h module -> ~2.5 à ~4.2h/chapitre.
+# Repli (heures absent) = profil "standard", identique à l'ancien comportement.
+_DENSITY_DEFAULT = {"contenu": "150 à 180", "applications": "120-150", "label": "standard"}
+
+
+def _density_profile(heures: int | None) -> dict:
+    """Retourne {contenu, applications, label} selon les heures/chapitre."""
+    if not heures or heures <= 0:
+        return _DENSITY_DEFAULT
+    h_chap = heures / NB_CHAPITRES_PAR_COURS
+    if h_chap < 2.8:        # modules légers (~30h)
+        return {"contenu": "120 à 150", "applications": "100-130", "label": "synthétique"}
+    if h_chap < 3.6:        # modules standards (~35-42h)
+        return _DENSITY_DEFAULT
+    return {"contenu": "190 à 230", "applications": "160-200", "label": "approfondi"}
+
+
 def _bloom_block(niveau: str) -> str:
     """Retourne un bloc d'instructions Bloom pour le niveau, ou '' si inconnu."""
     spec = _BLOOM_VERBS.get(niveau.strip().upper())
@@ -312,6 +332,7 @@ def build_agent_redacteur_user(
     questions_block = f"\n  {questions_guide}" if questions_guide else ""
     examples = _examples_guide(niveau)
     examples_line = f" {examples}" if examples else ""
+    dens = _density_profile(heures)
     return f"""Rédige le contenu complet du cours en JSON à partir du plan ci-dessous.
 
 CONTEXTE : {specialite} | {niveau} ({niveau_desc}) | {module} | {chapitre}{pos}{catalog}
@@ -322,10 +343,11 @@ PLAN :
 CONSIGNES DE RÉDACTION :
 - introduction : paragraphe de 4-5 phrases présentant le chapitre et ses enjeux
 - introduction_partie : 2-3 phrases introduisant chaque grande partie
-- contenu de chaque sous_partie : 150 à 180 mots, développement académique rigoureux
-  avec définitions, explications, et liens avec la spécialité {specialite}
+- contenu de chaque sous_partie : {dens["contenu"]} mots (profil {dens["label"]}, calibré sur
+  le volume horaire du module), développement académique rigoureux avec définitions,
+  explications, et liens avec la spécialité {specialite}
 - exemples : liste de 2 exemples concrets et contextualisés pour la spécialité {specialite}.{examples_line}
-- applications_pratiques : cas pratique détaillé de 120-150 mots
+- applications_pratiques : cas pratique détaillé de {dens["applications"]} mots
 - definitions : reprends IMPÉRATIVEMENT chaque terme listé dans plan.concepts_cles
   comme clé du dictionnaire 'definitions', avec une définition précise (2-3 phrases).
   Si le plan contient moins de 5 concepts, complète avec au plus 1 ou 2 termes
