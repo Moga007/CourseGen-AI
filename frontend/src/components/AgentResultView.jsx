@@ -124,7 +124,7 @@ export default function AgentResultView({ pipelineResult, formParams }) {
                             const a = document.createElement('a')
                             a.href = url
                             const _quizBase = formParams?.code_moodle
-                                ? `${formParams.code_moodle}_Ch${String(formParams.numero_chapitre || 1).padStart(2, '0')}_${(formParams.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}`
+                                ? `${formParams.code_moodle}_${(formParams.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}`
                                 : `quiz_${(formParams?.chapitre || 'cours').replace(/\s+/g, '_').toLowerCase()}`
                             a.download = `${_quizBase}.gift`
                             document.body.appendChild(a)
