@@ -565,24 +565,18 @@ _QUIZ_BLUEPRINT: dict[str, str] = {
         "contextualisés (mise en situation), pas du pur par-cœur."
     ),
     "M1": (
-        "Répartition cognitive cible : ~15% RESTITUTION, ~40% ANALYSE, "
-        "~45% ÉVALUATION. INTERDIT : amorces « Que signifie… », « Quelle est la "
-        "définition de… », acronymes à réciter, ou tout QCM de pur rappel. "
-        "CHAQUE QCM commence par un mini-scénario/cas concret (2-3 lignes décrivant "
-        "une situation, un montage, un contexte) puis pose une question de raisonnement ; "
-        "les 4 options sont toutes plausibles pour un connaisseur. Les Vrai/Faux "
-        "portent sur un JUGEMENT analytique (affirmation nuancée à évaluer), jamais "
-        "sur un fait à réciter."
+        "Répartition cible : ~20% RESTITUTION, ~45% APPLICATION/ANALYSE, ~35% "
+        "ÉVALUATION. Privilégie quand c'est naturel des QCM contextualisés (une "
+        "courte situation puis une question de raisonnement) ; une question "
+        "conceptuelle bien construite reste acceptable. Les Vrai/Faux portent sur "
+        "un jugement nuancé, pas un simple fait à réciter."
     ),
     "M2": (
-        "Répartition cognitive cible : restitution quasi nulle (<10%), majorité "
-        "ANALYSE CRITIQUE et ÉVALUATION. INTERDIT ABSOLU : toute question "
-        "définitionnelle ou d'acronyme (« Que signifie OCEANE », « Définition de… ») "
-        "— c'est éliminatoire. CHAQUE QCM décrit d'abord un cas réel ou un scénario "
-        "(émission, montage, arbitrage, situation de marché) puis demande la meilleure "
-        "analyse/décision ; les 4 options sont toutes défendables par un expert, une "
-        "seule est optimale. Les Vrai/Faux énoncent une affirmation experte nuancée "
-        "(souvent un piège conceptuel subtil) à trancher par le raisonnement."
+        "Répartition cible : restitution faible (~10%), majorité ANALYSE et "
+        "ÉVALUATION. Préfère des QCM contextualisés (mise en situation, cas) et des "
+        "Vrai/Faux à piège conceptuel nuancé plutôt que des définitions sèches. "
+        "Réaliste : QCM et Vrai/Faux évaluent l'analyse et l'évaluation, PAS la "
+        "conception ni l'élaboration (voir note de périmètre)."
     ),
 }
 _QUIZ_BLUEPRINT["B1"] = _QUIZ_BLUEPRINT["L1"]
@@ -629,31 +623,29 @@ CONTENU DU COURS :
 {contenu_tronque}
 
 INSTRUCTIONS :
-- EXACTEMENT 12 à 15 questions au total (jamais moins de 12, jamais plus de 15)
+- 12 à 20 questions au total (cible indicative ; jamais moins de 12)
 - DEUX types de questions UNIQUEMENT : QCM (≈70 %) et Vrai/Faux (≈30 %).
   AUCUN autre type : pas de réponse courte, pas de question ouverte/essay.
 - Chaque QCM : 1 bonne réponse + 3 distracteurs ; format GIFT valide.
 
-ALIGNEMENT SUR LES OBJECTIFS (alignement constructif) :
+ALIGNEMENT SUR LES OBJECTIFS (réaliste) :
 Le cours contient une section « Objectifs pédagogiques » (liste à puces).
-CHAQUE objectif pédagogique listé doit être évalué par AU MOINS une question.
-Aucune question ne doit porter sur un point hors objectifs/concepts du cours.
+Couvre par ≥1 question chaque objectif ÉVALUABLE en QCM/Vrai-Faux, c.-à-d. les
+objectifs en Définir / Identifier / Calculer / Appliquer / Analyser / Évaluer /
+Critiquer.
+PÉRIMÈTRE (important) : les objectifs de niveau conception — verbes Concevoir,
+Élaborer, Problématiser, Formaliser — ne sont PAS évaluables par un QCM ou un
+Vrai/Faux. N'invente pas de question artificielle pour eux : ils relèvent d'un
+devoir ou d'un projet, pas d'un quiz. Mieux vaut ne pas les couvrir que produire
+une question factice. Aucune question hors objectifs/concepts du cours.
 
 CALIBRAGE COGNITIF (niveau {niveau}) :
 {blueprint_line}
-Le verbe de chaque objectif indique le niveau Bloom attendu : un objectif « Définir… »
-→ question de restitution ; un objectif « Analyser… » / « Évaluer… » / « Concevoir… »
-→ QCM en mise en situation où il faut raisonner (jamais une définition à reconnaître).
-
-VÉRIFICATION AVANT DE RÉPONDRE (auto-contrôle obligatoire) :
-(a) entre 12 et 15 questions ; (b) uniquement QCM et Vrai/Faux ;
-(c) chaque objectif pédagogique couvert par ≥1 question ;
-(d) si niveau M1/M2 : AUCUN QCM définitionnel ou d'acronyme, chaque QCM est un cas/scénario.
 
 Retourne UNIQUEMENT ce JSON :
 {{
   "contenu_gift": "<quiz complet au format GIFT Moodle>",
-  "nb_questions": <nombre, entre 12 et 15>,
+  "nb_questions": <nombre, 12 à 20>,
   "repartition": {{
     "qcm": <n>,
     "vrai_faux": <n>
